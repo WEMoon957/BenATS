@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.env
+.env.deploy
+*.log
+.browser-profile/
+.boss-sessions/

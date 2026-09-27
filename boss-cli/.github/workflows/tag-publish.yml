@@ -1,0 +1,159 @@
+name: tag-publish
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Publish version without leading v (optional; defaults to package.json when manually dispatched)'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-publish-${{ github.ref_name || github.event.inputs.version || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Validate npm credentials
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NPM_TOKEN" ]; then
+            echo "::error::Missing GitHub Actions secret: NPM_TOKEN"
+            exit 1
+          fi
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'npm'
+
+      - name: Resolve target version
+        id: version
+        run: |
+          set -euo pipefail
+          current_version="$(node -p "require('./package.json').version")"
+          if [[ "${GITHUB_REF_NAME:-}" == v* ]]; then
+            target_version="${GITHUB_REF_NAME#v}"
+          elif [[ -n "${{ github.event.inputs.version }}" ]]; then
+            target_version="${{ github.event.inputs.version }}"
+          else
+            target_version="$current_version"
+          fi
+
+          if ! [[ "$target_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid publish version: $target_version" >&2
+            exit 1
+          fi
+
+          echo "current=$current_version" >> "$GITHUB_OUTPUT"
+          echo "target=$target_version" >> "$GITHUB_OUTPUT"
+
+      - name: Sync package version
+        run: |
+          current_version="$(node -p "require('./package.json').version")"
+          target_version="${{ steps.version.outputs.target }}"
+          if [ "$current_version" != "$target_version" ]; then
+            npm version "$target_version" --no-git-tag-version
+          else
+            echo "package.json version already $target_version; skip npm version"
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build package
+        run: npm run build
+
+      - name: Check published npm version
+        id: npm_version
+        run: |
+          version="${{ steps.version.outputs.target }}"
+          if npm view "@joohw/boss-cli@${version}" version --registry=https://registry.npmjs.org/ >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "@joohw/boss-cli ${version} is already published; skipping npm publish."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check publish payload
+        if: ${{ steps.npm_version.outputs.exists != 'true' }}
+        run: npm pack --dry-run --json
+
+      - name: Publish npm package
+        if: ${{ steps.npm_version.outputs.exists != 'true' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public
+
+      - name: Update npm latest dist-tag
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          target="${{ steps.version.outputs.target }}"
+          npm dist-tag add "@joohw/boss-cli@${target}" latest --registry=https://registry.npmjs.org/
+
+      - name: Verify npm latest
+        run: |
+          set -euo pipefail
+          target="${{ steps.version.outputs.target }}"
+          for attempt in $(seq 1 10); do
+            if current="$(npm view "@joohw/boss-cli" version --registry=https://registry.npmjs.org/)" &&
+              tags="$(npm dist-tag ls "@joohw/boss-cli" --registry=https://registry.npmjs.org/)"; then
+              latest="$(printf '%s\n' "$tags" | awk -F': ' '$1 == "latest" { print $2 }')"
+              if [ "$current" = "$target" ] && [ "$latest" = "$target" ]; then
+                exit 0
+              fi
+              echo "npm registry reports version=${current}, latest=${latest}; waiting for ${target} (attempt ${attempt}/10)..."
+            else
+              echo "npm registry metadata read failed (attempt ${attempt}/10); retrying in 6s..."
+            fi
+            sleep 6
+          done
+          echo "Timed out waiting for @joohw/boss-cli npm latest to become ${target}" >&2
+          exit 1
+
+  release:
+    needs: publish
+    if: ${{ startsWith(github.ref, 'refs/tags/v') && needs.publish.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$TAG_NAME" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$TAG_NAME" \
+              --notes-file <(gh api \
+                -X POST \
+                -H "Accept: application/vnd.github+json" \
+                "/repos/$GITHUB_REPOSITORY/releases/generate-notes" \
+                -f tag_name="$TAG_NAME" \
+                --jq .body)
+          else
+            gh release create "$TAG_NAME" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$TAG_NAME" \
+              --generate-notes \
+              --verify-tag
+          fi
