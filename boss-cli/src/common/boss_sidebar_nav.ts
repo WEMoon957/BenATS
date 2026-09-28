@@ -11,8 +11,11 @@ export async function clickBossSidebarMenuToPath(
   menuLabel: string,
   targetPath: string,
 ): Promise<void> {
-  const clicked = (await page.evaluate(
-    `(({ label, path }) => {
+  const labelLiteral = JSON.stringify(menuLabel);
+  const pathLiteral = JSON.stringify(targetPath);
+  const clicked = (await page.evaluate(`(() => {
+      const label = ${labelLiteral};
+      const path = ${pathLiteral};
       const norm = (v) => (v ?? "").replace(/\\s+/g, "");
       const links = Array.from(document.querySelectorAll(".menu-list a"));
       const target = links.find((a) => {
@@ -29,9 +32,7 @@ export async function clickBossSidebarMenuToPath(
       target.scrollIntoView({ block: "center", inline: "nearest" });
       target.click();
       return true;
-    })`,
-    { label: menuLabel, path: targetPath },
-  )) as boolean;
+    })()`)) as boolean;
 
   if (!clicked) {
     throw new Error(`未找到侧边栏菜单“${menuLabel}”，无法跳转到 ${targetPath}。`);
@@ -40,15 +41,15 @@ export async function clickBossSidebarMenuToPath(
   await sleepRandom(SIDEBAR_NAV_AFTER_CLICK_MS.min, SIDEBAR_NAV_AFTER_CLICK_MS.max);
 
   await page.waitForFunction(
-    `((path) => {
+    `(() => {
+      const path = ${pathLiteral};
       try {
         const p = window.location.pathname.replace(/\\/+$/, "") || "/";
         return p === path;
       } catch {
         return false;
       }
-    })`,
+    })()`,
     { timeout: SIDEBAR_NAV_WAIT_MS },
-    targetPath,
   );
 }

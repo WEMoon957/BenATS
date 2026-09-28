@@ -209,7 +209,7 @@ def build_screening_message(
     cumulative_count: int | None = None,
 ) -> dict:
     safe_job_title = _truncate_utf8(redact_text(job_title or "未命名岗位"), 512)
-    counts = {"A优先约面": 0, "B电话确认": 0, "C不推进": 0}
+    counts = {"S电话沟通": 0, "A优先约面": 0, "B电话确认": 0, "C不推进": 0}
     for evaluation in evaluations:
         counts[evaluation.conclusion] = counts.get(evaluation.conclusion, 0) + 1
     submitted = len(evaluations) if submitted_count is None else submitted_count
@@ -223,15 +223,15 @@ def build_screening_message(
         _text_line(f"本轮提交文件数：{submitted}"),
         _text_line(f"成功评估人数：{len(evaluations)}"),
         _text_line(f"处理失败数：{failed}"),
-        _text_line("结论分布：A优先约面 {a} · B电话确认 {b} · C不推进 {c}".format(
-            a=counts["A优先约面"], b=counts["B电话确认"], c=counts["C不推进"]
+        _text_line("结论分布：S电话沟通 {s} · A优先约面 {a} · B电话确认 {b} · C不推进 {c}".format(
+            s=counts["S电话沟通"], a=counts["A优先约面"], b=counts["B电话确认"], c=counts["C不推进"]
         )),
     ]
     if mode == "incremental":
         lines.append(_text_line(f"岗位累计成功评估人数：{cumulative_count or 0}"))
     if mode == "rescreen":
         lines.append(_text_line("筛选标准已更新，本次为全量重新筛选结果。"))
-    priority = [item for item in evaluations if item.conclusion in {"A优先约面", "B电话确认"}]
+    priority = [item for item in evaluations if item.conclusion in {"S电话沟通", "A优先约面", "B电话确认"}]
     if priority:
         for index, evaluation in enumerate(priority[:_SCREENING_TOP_N], start=1):
             candidate_name = _truncate_utf8(str(evaluation.candidate_name or "未知姓名"), 512)

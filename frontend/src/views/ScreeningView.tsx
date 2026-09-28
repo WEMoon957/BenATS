@@ -32,7 +32,10 @@ export interface ScreeningViewProps {
 interface ResultRow {
   source_file?: string;
   candidate_name?: string;
+  /** 结论文案（后端原文，仅用于排查，不参与界面判断） */
   conclusion?: string;
+  /** 结论等级机器值：S / A / B / C */
+  grade?: string;
   one_line?: string;
   blockers?: string[] | string;
   next_action?: string[] | string;
@@ -168,13 +171,18 @@ function stageLabel(stage: string): string {
   return t("stageFallback");
 }
 
-function conclusionClass(conclusion: string): ConclusionGrade {
-  return conclusion.startsWith("A") ? "a" : conclusion.startsWith("B") ? "b" : "c";
+/** 结论等级 → 徽章等级（S→s、A→a、B→b、其余→c） */
+function gradeClass(grade: string): ConclusionGrade {
+  if (grade === "S") return "s";
+  if (grade === "A") return "a";
+  return grade === "B" ? "b" : "c";
 }
 
-function conclusionLabel(conclusion: string): string {
-  if (conclusion.startsWith("A")) return t("conclusionA");
-  if (conclusion.startsWith("B")) return t("conclusionB");
+/** 结论等级 → 当前语言文案 */
+function gradeLabel(grade: string): string {
+  if (grade === "S") return t("conclusionS");
+  if (grade === "A") return t("conclusionA");
+  if (grade === "B") return t("conclusionB");
   return t("conclusionC");
 }
 
@@ -663,12 +671,13 @@ export function ScreeningView({ view, onNavigate, onToast, onRequireSettings, re
   const allResults = (job?.results as ResultRow[] | undefined) || [];
   const counts = {
     all: allResults.length,
-    a: allResults.filter((item) => item.conclusion === "A优先约面").length,
-    b: allResults.filter((item) => item.conclusion === "B电话确认").length,
-    c: allResults.filter((item) => item.conclusion === "C不推进").length,
+    s: allResults.filter((item) => item.grade === "S").length,
+    a: allResults.filter((item) => item.grade === "A").length,
+    b: allResults.filter((item) => item.grade === "B").length,
+    c: allResults.filter((item) => item.grade === "C").length,
   };
   const filter = state.resultFilter;
-  const filtered = filter === "all" ? allResults : allResults.filter((item) => item.conclusion === filter);
+  const filtered = filter === "all" ? allResults : allResults.filter((item) => item.grade === filter);
   const resultErrors = (job?.errors as string[] | undefined) || [];
   const resultMeta = [
     t("candidateCount", { count: filtered.length }),
@@ -679,7 +688,7 @@ export function ScreeningView({ view, onNavigate, onToast, onRequireSettings, re
     .map((item) => ({
       source_file: item.source_file as string,
       candidate_name: item.candidate_name,
-      conclusion: item.conclusion,
+      grade: item.grade,
     }));
   const compareEnabled = completed && state.compareSelection.size >= 2;
 
@@ -801,7 +810,7 @@ export function ScreeningView({ view, onNavigate, onToast, onRequireSettings, re
           {liveRows.map((item, index) => (
             <div className="live-row" key={`${item.candidate_name}|${item.source_file}|${index}`} style={{ animationDelay: `${Math.min(index * 45, 315)}ms` }}>
               <strong>{item.candidate_name || ""}</strong>
-              <Tag grade={conclusionClass(item.conclusion || "")}>{conclusionLabel(item.conclusion || "")}</Tag>
+              <Tag grade={gradeClass(item.grade || "")}>{gradeLabel(item.grade || "")}</Tag>
               <span>{item.one_line || ""}</span>
             </div>
           ))}
@@ -985,6 +994,7 @@ export function ScreeningView({ view, onNavigate, onToast, onRequireSettings, re
       <div className="result-summary" id="resultSummary">
         {[
           [t("summaryCandidates"), counts.all],
+          [t("summaryS"), counts.s],
           [t("summaryA"), counts.a],
           [t("summaryB"), counts.b],
           [t("summaryC"), counts.c],
@@ -999,9 +1009,10 @@ export function ScreeningView({ view, onNavigate, onToast, onRequireSettings, re
         <div className="segmented-control" id="resultFilter" role="group" aria-label={t("resultFilter")}>
           {[
             ["all", t("filterAll")],
-            ["A优先约面", t("filterA")],
-            ["B电话确认", t("filterB")],
-            ["C不推进", t("filterC")],
+            ["S", t("filterS")],
+            ["A", t("filterA")],
+            ["B", t("filterB")],
+            ["C", t("filterC")],
           ].map(([value, label]) => (
             <button
               type="button"
@@ -1082,10 +1093,10 @@ export function ScreeningView({ view, onNavigate, onToast, onRequireSettings, re
                   <td className="compare-cell">
                     <input
                       type="checkbox"
-                      disabled={!completed || item.conclusion === "C不推进" || (
+                      disabled={!completed || item.grade === "C" || (
                         state.compareSelection.size >= 20 && !state.compareSelection.has(item.source_file || "")
                       )}
-                      title={item.conclusion === "C不推进" ? t("compareExcludeC") : undefined}
+                      title={item.grade === "C" ? t("compareExcludeC") : undefined}
                       checked={Boolean(item.source_file && state.compareSelection.has(item.source_file))}
                       onChange={() => toggleCompare(item)}
                     />
@@ -1119,7 +1130,7 @@ export function ScreeningView({ view, onNavigate, onToast, onRequireSettings, re
                     )}
                   </td>
                   <td className="badge-cell">
-                    <Tag grade={conclusionClass(item.conclusion || "")}>{conclusionLabel(item.conclusion || "")}</Tag>
+                    <Tag grade={gradeClass(item.grade || "")}>{gradeLabel(item.grade || "")}</Tag>
                   </td>
                   <td>{cellText(item.one_line)}</td>
                   <td>{cellText(item.blockers)}</td>

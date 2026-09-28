@@ -699,11 +699,11 @@ export async function runOpenCandidateChat(
             const style = window.getComputedStyle(el);
             return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
           };
-          const selected = Array.from(document.querySelectorAll(".geek-item.selected")).find(isVisible);
-          const selectedName = norm(selected?.querySelector(".geek-name")?.textContent);
-          const root = Array.from(document.querySelectorAll(".base-info-single-container")).find(isVisible);
-          const detailName = norm(root?.querySelector(".name-box")?.textContent);
-          return matches(selectedName) && matches(detailName);
+          const roots = Array.from(document.querySelectorAll(".base-info-single-container")).filter(isVisible);
+          const detailMatched = roots.some((el) => matches(norm(el.querySelector(".name-box")?.textContent)));
+          if (detailMatched) return true;
+          const selected = Array.from(document.querySelectorAll(".geek-item.selected")).filter(isVisible);
+          return selected.some((el) => matches(norm(el.querySelector(".geek-name")?.textContent)));
         })()`,
         { timeout: 15_000 },
       );
@@ -725,6 +725,7 @@ export async function runOpenCandidateChat(
               item.querySelector(".item-friend .text span")?.textContent ??
               item.querySelector(".item-myself .text span")?.textContent ??
               item.querySelector(".item-system .message-card-top-title")?.textContent ??
+              item.querySelector(".item-friend .message-card-top-title")?.textContent ??
               "";
             return txt.replace(/\\s+/g, " ").trim().length > 0;
           });

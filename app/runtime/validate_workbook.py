@@ -375,17 +375,17 @@ def validate_loaded_workbook(wb, initial_errors: list[str]) -> tuple[list[str], 
                 continue
             recommend_candidates.add(candidate)
             conclusion = cell_text(ws, row_number, headers, "结论")
-            if conclusion != "A优先约面":
+            if conclusion not in {"S电话沟通", "A优先约面"}:
                 errors.append(
-                    f"{RECOMMEND_SHEET} contains non-A candidate: {candidate}"
+                    f"{RECOMMEND_SHEET} contains non-S/A candidate: {candidate}"
                 )
-    a_candidates = {
+    sa_candidates = {
         candidate
         for candidate, conclusion in summary_conclusions.items()
-        if conclusion == "A优先约面"
+        if conclusion in {"S电话沟通", "A优先约面"}
     }
-    for candidate in sorted(a_candidates - recommend_candidates):
-        errors.append(f"{RECOMMEND_SHEET} missing A candidate: {candidate}")
+    for candidate in sorted(sa_candidates - recommend_candidates):
+        errors.append(f"{RECOMMEND_SHEET} missing S/A candidate: {candidate}")
 
     return errors, warnings
 

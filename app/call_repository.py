@@ -18,17 +18,17 @@ class CallRepository(JsonStore):
 
     def create(self, title: str = "", job_title: str = "", soft_skill_focus: str = "",
                job_id: str = "", soft_skill_dimensions: list[str] | None = None,
-               title_mode: str | None = None) -> dict:
+               title_mode: str | None = None, roster: list[dict] | None = None) -> dict:
         return super().create(
             title=title, job_title=job_title, soft_skill_focus=soft_skill_focus,
             job_id=job_id, soft_skill_dimensions=soft_skill_dimensions or [],
-            title_mode=title_mode,
+            title_mode=title_mode, roster=roster or [],
         )
 
     def _new_record(self, record_id: str, now: str, title: str = "", job_title: str = "",
                      soft_skill_focus: str = "", job_id: str = "",
                      soft_skill_dimensions: list[str] | None = None,
-                     title_mode: str | None = None) -> dict:
+                     title_mode: str | None = None, roster: list[dict] | None = None) -> dict:
         clean_title = title.strip()
         resolved_title_mode = title_mode or ("custom" if clean_title else "auto")
         return {
@@ -47,6 +47,7 @@ class CallRepository(JsonStore):
             "archived_at": None,
             "audio_hashes": {},
             "items": [],
+            "roster": list(roster or []),
             "errors": [],
             "feishu_baseline_item_ids": [],
             "feishu_baseline_version": 1,

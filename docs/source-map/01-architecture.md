@@ -41,6 +41,11 @@ FastAPI app/main.py
   │    ├─ speech_to_text.py ── 火山 ASR API
   │    ├─ OpenAICompatibleClient ── 外部模型 API
   │    └─ push_with_status ─────── app/feishu.py ── 飞书 Webhook（逐条电话记录）
+  ├─ AutomationEngine ──────────── app/connectors/automation.py
+  │    ├─ BossCliConnector ────── app/connectors/boss_cli.py ── 子进程 boss-cli（本机 Chrome）
+  │    ├─ OutreachStore ───────── app/connectors/outreach.py ── outreaches/<id>/
+  │    ├─ AutomationStore ─────── app/connectors/automation.py ── automation.json
+  │    └─ EvaluationEngine / CallRepository ── 启动筛选、创建 S 级电话任务
   └─ artifact_preview.py ───────── Markdown / XLSX 限量预览
 ```
 
@@ -61,6 +66,7 @@ launcher.py 或 python -m app.main
   → 生成随机 app_token
   → create_app(data_dir, app_token)
   → 装配 SettingsStore / repositories / engines
+  → app.state.automation.start() 启动招聘接入轮询线程（仅 main() 启动路径拉起）
   → Uvicorn 绑定 127.0.0.1
   → GET / 注入 app_token 到 HTML meta
   → 前端 main.tsx 挂载 React App

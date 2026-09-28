@@ -33,9 +33,15 @@ export interface BossViewProps {
   onToast: (message: string) => void;
 }
 
-function kindLabel(kind: string): string {
-  if (kind === "send") return t("outreachKindSend");
-  if (kind === "action") return t("outreachKindAction");
+function kindLabel(action: OutreachAction): string {
+  if (action.kind === "action" && action.command === "request-attachment-resume") {
+    return t("outreachKindRequestResume");
+  }
+  if (action.kind === "action" && action.command === "agree-resume") {
+    return t("outreachKindAgreeResume");
+  }
+  if (action.kind === "send") return t("outreachKindSend");
+  if (action.kind === "action") return t("outreachKindAction");
   return t("outreachKindGreet");
 }
 
@@ -51,6 +57,7 @@ export function BossView({ onToast }: BossViewProps) {
   const [outreaches, setOutreaches] = useState<OutreachRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [approvingAll, setApprovingAll] = useState(false);
   const [, rerender] = useState(0);
 
   const load = useCallback(async () => {
@@ -113,6 +120,22 @@ export function BossView({ onToast }: BossViewProps) {
     }
   };
 
+  const approveAll = async () => {
+    const count = pending.length;
+    if (count === 0) return;
+    if (!window.confirm(t("bossApproveAllConfirm", { count }))) return;
+    setApprovingAll(true);
+    try {
+      const result = await api<{ sent: number; failed: number }>("/api/boss/outreaches/approve-all", { method: "POST" });
+      onToast(t("bossApproveAllDone", { sent: result.sent, failed: result.failed }));
+      await load();
+    } catch (error) {
+      onToast((error as Error).message);
+    } finally {
+      setApprovingAll(false);
+    }
+  };
+
   const pending = outreaches.filter((item) => item.status === "pending");
   const processed = outreaches.filter((item) => item.status !== "pending");
 
@@ -144,6 +167,14 @@ export function BossView({ onToast }: BossViewProps) {
         <div className="subsection-heading">
           <h3>{t("bossOutreachReview")}</h3>
           <span>{t("bossPendingCount", { count: pending.length })}</span>
+          <Button
+            variant="primary"
+            busy={approvingAll}
+            disabled={loading || pending.length === 0}
+            onClick={() => void approveAll()}
+          >
+            {t("bossApproveAll")}
+          </Button>
         </div>
         {pending.length === 0 ? (
           <p className="boss-empty">{t("bossPendingEmpty")}</p>
@@ -153,7 +184,7 @@ export function BossView({ onToast }: BossViewProps) {
               <li className="boss-outreach-item" key={item.id}>
                 <div className="boss-outreach-main">
                   <strong>{item.action.target}</strong>
-                  <span className="boss-outreach-kind">{kindLabel(item.action.kind)}</span>
+                  <span className="boss-outreach-kind">{kindLabel(item.action)}</span>
                   <span className="boss-outreach-meta">
                     {item.action.job_keyword ? `· ${item.action.job_keyword}` : ""}
                     {item.action.text ? `· ${item.action.text}` : ""}
@@ -183,7 +214,7 @@ export function BossView({ onToast }: BossViewProps) {
                 <li className="boss-outreach-item is-processed" key={item.id}>
                   <div className="boss-outreach-main">
                     <strong>{item.action.target}</strong>
-                    <span className="boss-outreach-kind">{kindLabel(item.action.kind)}</span>
+                    <span className="boss-outreach-kind">{kindLabel(item.action)}</span>
                   </div>
                   <span className={`boss-outreach-status is-${item.status}`}>{statusLabel(item.status)}</span>
                 </li>

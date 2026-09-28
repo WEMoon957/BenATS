@@ -20,7 +20,8 @@
 | 硬性门槛 `hard_gate` / `HardGateVerdict` | criteria prompt、评估 prompt、`apply_hard_gate_guard()`、Excel 总表列、硬性门槛验证 |
 | 软性素质评价 / `soft_skill_summary` | `soft-skill-framework.md`、整理 prompt、narrative 渲染、前端维度 chips、前端岗位联动关键词映射 `SOFT_SKILL_KEYWORD_MAP`、电话验证 |
 | 电话字段确定性 / `fields[].status` | 整理 prompt、`CallField`、电话详情字段徽标、API 契约、电话验证 |
-| A/B/C 枚举 | 模型、guard、排序、工作簿契约、校验器、前端精确匹配、AI 对比、验证 |
+| A/B/C 枚举或结论等级 `grade` | 模型、guard、排序、工作簿契约、校验器、`result_preview()` 与 `public_job()` 的等级派生、前端 grade 过滤与徽章配色、AI 对比、验证 |
+| 招聘平台接入（`app/connectors/`、`/api/boss/*`） | `boss_cli.py` 的命令参数与输出解析、`outreach.py` 的动作字段与状态机、`automation.py` 的轮询间隔与去重状态、`main.py` 的端点与 `BossCliError` 映射、`BossView` 的审核操作与文案、`BOSSCLI_BIN`、触达审核边界 |
 | `source_file` 语义 | 上传命名、续跑、追加简历、结果预览、AI 对比、缓存、前端选择键、验证 |
 | 简历解析策略 | `extract_resume_text.py`、`pipeline.extract_document()`、OCR 状态、上传类型、预览支持、解析验证 |
 | Excel 表名或表头 | `workbook_contract.py`、payload、构建器、校验器、预览、验证、业务使用方 |

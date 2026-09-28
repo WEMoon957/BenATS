@@ -58,6 +58,16 @@ pipeline._run / phone_screening._run 或独立通知重试 API
   -> 错误转换为不含 Webhook 和密钥的类别、HTTP 状态/业务码及尝试次数
 ```
 
+招聘接入子进程链路：
+
+```text
+AutomationEngine / 触达审批端点
+  -> boss_bin() 读取 BOSSCLI_BIN，未设置时回退到 PATH 中的 boss
+  -> subprocess.run([boss, ...], timeout=180)，UTF-8 捕获 stdout / stderr
+  -> 解析纯文本输出为职位、候选人、未读消息与附件简历路径
+  -> 可执行文件缺失、命令超时或非零退出统一抛 BossCliError，API 层映射为 503
+```
+
 关键约束：
 
 - 设置框不回填已保存密钥；空输入表示保留，`clear_asr` / `clear_feishu_sign` 表示清除。
@@ -82,6 +92,7 @@ pipeline._run / phone_screening._run 或独立通知重试 API
 | 简历原文证据校验 | `app/pipeline.py` | 分级、硬性门槛、人工展示、验证 |
 | 电话事实录音定位 | `app/runtime/phone_screening.py` 的 `attach_fact_timestamps()` | `facts[].ref` 与转写时间；不裁决正文、软性素质评价或字段状态 |
 | Excel 公式和外链防护 | 工作簿构建器、校验器 | 工作簿契约、预览、验证 |
+| 外部平台子进程调用 | `app/connectors/boss_cli.py` | `BOSSCLI_BIN` 取值、命令超时、错误文本的回传范围、触达必须经 HR 审核后才执行 |
 | XSS 防护 | React 文本渲染、预览组件 | Markdown、模型输出、表格预览 |
 
 不得绕过令牌、路径校验、简历证据守卫或工作簿校验。电话引用无法定位时保持无时间点，由前端降级为不可跳转，不得据此删除或改写模型业务内容。

@@ -55,6 +55,7 @@ Talent Hub runs these steps as one flow, leaves a verifiable basis for each one,
 
 | Step | How Talent Hub handles it |
 | --- | --- |
+| **Candidate sourcing** | Pulls open positions and attached resumes from BOSS Zhipin and creates tasks automatically |
 | **Bulk screening** | Screens against one consistent standard and returns a tiered shortlist |
 | **Justifying & reviewing calls** | Attaches a traceable basis to each judgment and flags uncertain points |
 | **Phone confirmation** | Transcribes recordings and organizes the key points; reviewed records export as files |
@@ -65,23 +66,41 @@ Talent Hub runs these steps as one flow, leaves a verifiable basis for each one,
 
 Currently supported modules:
 
+### Boss Connect (BOSS Zhipin)
+
+| Capability | Description |
+| --- | --- |
+| **Automatic position import** | Pulls open positions on a schedule and creates a screening task with the job brief for every position seen for the first time. |
+| **Candidate sourcing** | Pulls recommended candidates for each position and drafts a "greet" outreach action. |
+| **Outreach review** | Every outbound action is drafted first. HR approves or rejects each draft in Boss Connect, or sends all pending drafts at once; a failed send records its reason without blocking the other drafts. |
+| **Inbound message handling** | When a candidate messages you, the app drafts a response: "accept resume" for an attached-resume request, otherwise a reply that also asks for the resume. |
+| **Attached resume retrieval** | Attached resumes from contacted candidates are downloaded into the matching task; after three consecutive rounds without a resume, one "request resume" draft is created. |
+| **Screening hand-off** | Tasks with both a job brief and resumes start screening automatically, and S-tier candidates from a completed run enter a phone-confirmation task. |
+| **Deduplication** | Processed positions and candidate states are stored locally, so the same position or candidate never runs through the flow twice. |
+| **Engine control** | The automation engine starts with the app and advances one round every five minutes by default; you can stop it, start it again, or run a single round from the interface. |
+
+> [!NOTE]
+> Boss Connect requires a separately deployed boss-cli and a signed-in BOSS Zhipin account. Prerequisites and setup steps are in [APP_GUIDE「招聘接入」](APP_GUIDE.md#招聘接入) (Chinese).
+
 ### Resume screening
 
 | Capability | Description |
 | --- | --- |
-| **Criteria first** | Generates the job essence, target profile, business scenarios, key actions, hard requirements, negative signals, and A/B/C decision rules from the JD. |
+| **Criteria first** | Generates the job essence, target profile, business scenarios, key actions, hard requirements, negative signals, per-dimension scoring anchors, and A/B/C decision rules from the JD. |
 | **Evidence-driven evaluation** | Match and mismatch judgments must be grounded in the resume source: direct quotes are preferred, and reasonable inference from the full experience is allowed; judgments with no traceable basis in the source are downgraded or sent to manual review. |
-| **Tiered recommendations** | Code applies one state machine: a supported hard/core mismatch is C, an unknown hard/core fact is B, and all required checks passing is A. |
+| **Per-dimension scoring & S tier** | The model scores the four core dimensions (object/scenario/actions/ownership) from 0 to 10; when all hard gates pass, the conclusion is A, and every score meets the threshold, code promotes the candidate to S and routes them to phone contact. |
+| **Tiered recommendations** | Code applies one state machine: a supported hard/core mismatch is C, an unknown hard/core fact is B, all required checks passing is A, and an A whose dimension scores all meet the threshold becomes S. |
 | **Batch evaluation** | Supports 1–12 concurrent candidates. Each resume follows one evaluation flow, but retryable transport errors or failed JSON/structure validation can trigger another model request. One parsing or model-request failure does not stop the remaining resumes. |
 | **Saved partial results** | Each successful evaluation is saved locally immediately; if batch finalization fails, completed candidates remain viewable and the run can be restarted, while download, append, and notification actions stay unavailable until formal artifacts exist. |
-| **Side-by-side comparison** | Compares up to 20 A/B candidates; code keeps every A ahead of every B, while AI only orders candidates within the same tier and explains why. |
+| **Side-by-side comparison** | Compares up to 20 S/A/B candidates; code keeps every S ahead of every A and every A ahead of every B, while AI only orders candidates within the same tier and explains why. |
 | **Multi-format parsing** | Supports PDF, DOCX, TXT, Markdown, and common image formats; scanned documents can use Tesseract OCR. |
-| **Deliverable results** | Generates and validates a five-sheet Excel workbook (candidate summary, evidence matching, phone-confirmation questions, screening criteria, recommendation list) plus Markdown screening criteria. |
+| **Deliverable results** | Generates and validates a five-sheet Excel workbook (candidate summary with per-dimension score summary and ranking, evidence matching, phone-confirmation questions, screening criteria, recommendation list) plus Markdown screening criteria. |
 
 ### Phone screening
 
 | Capability | Description |
 | --- | --- |
+| **S-tier contact roster** | With automation enabled, S-tier candidates from completed screening land in a phone-confirmation task with their names and one-line judgments, ready for HR to call one by one. |
 | **Batch transcription** | Upload multiple recordings (m4a / wav / mp3 / ogg / opus) powered by Volcano Engine ASR. |
 | **AI summarization** | Uses a senior-recruiter perspective to produce structured notes, soft-skill evaluations that prioritize the selected focus dimensions without being limited to them, and an optional Q&A transcript (off by default to reduce output length and processing time). |
 | **Structured result delivery** | Code validates JSON and required structure only. It does not delete model-produced notes or soft-skill evaluations or change field status based on citations; citations are used only for audio positioning. |
@@ -92,7 +111,7 @@ Currently supported modules:
 | Capability | Description |
 | --- | --- |
 | **Auto notification on completion** | Pushes results to a designated Feishu group when resume screening or phone screening finishes. |
-| **HR-focused result messages** | Each resume-screening run sends one overview with submitted/successful/failed counts, A/B/C distribution, and one-line judgments for up to five A/B candidates. Phone screening sends one organized record per candidate; records over the per-message limit are truncated with a prompt to return to the app. |
+| **HR-focused result messages** | Each resume-screening run sends one overview with submitted/successful/failed counts, S/A/B/C distribution, and one-line judgments for up to five S/A/B candidates. Phone screening sends one organized record per candidate; records over the per-message limit are truncated with a prompt to return to the app. |
 | **Incremental deduplication** | Appended resumes notify only newly evaluated results and include the cumulative role total; appended recordings send only entries not yet pushed successfully; a full re-screen after criteria changes is notified as a new version. |
 | **Reliable delivery** | Transient network errors, HTTP 429, and 5xx responses receive limited retries with rate limiting; push failures are recorded without changing the screening or phone task's business status. |
 | **Manual resume-notification retry** | From a completed resume-screening result, click "Retry Feishu notification" to send only pending results and see whether this attempt sent anything. The phone task view has no manual retry action wired up yet; the retry capability is provided by a backend endpoint. |
@@ -106,6 +125,7 @@ Currently supported modules:
 - **Fairness safeguards**: model prompts prohibit using age, sex, ethnicity, place of origin, marital status, or reproductive status for evaluation or ranking. Code also filters hard requirements, A/B/C conditions, and negative signals against its built-in protected-attribute terms. These safeguards do not replace human bias review.
 - **Frontend**: React + TypeScript frontend (Vite build), served by FastAPI.
 - **Optional Feishu notifications**: pushes result summaries via a Feishu custom bot Webhook, with no new third-party dependency.
+- **Optional Boss Zhipin integration**: reads positions, candidates, and attached resumes through a locally deployed boss-cli (a standalone Node/TS CLI driving the local Chrome over CDP), and hands HR-approved outreach actions to it for sending. When it is missing or not signed in, only Boss Connect is unavailable; the other modules are unaffected.
 
 ## Quick start (development)
 
@@ -195,6 +215,7 @@ Phone-call transcription uses **Volcano Engine large-model speech recognition (a
 | `TALENT_HUB_FEISHU_SIGN_SECRET` | Injects the Feishu bot signature secret via environment variable; the Webhook URL can still be saved in Settings. |
 | `TALENT_HUB_DATA_DIR` | Overrides the default data directory (Windows: `%LOCALAPPDATA%\TalentHub`; macOS: `~/.local/share/TalentHub`) for settings, task materials, and result files. Parsed JD text is saved. The operator is responsible for keeping a custom path outside the source tree. |
 | `TESSERACT_CMD` | Specifies the Tesseract executable path; if unset, the app tries `PATH` and platform-specific common locations. |
+| `BOSSCLI_BIN` | Specifies the boss-cli executable path; if unset, the `boss` command on `PATH` is used. |
 
 ## Feishu push setup (optional)
 
@@ -247,14 +268,16 @@ The script creates `dist/TalentHub.app` and `release/<version>/macos/TalentHub-m
 - The service listens only on the loopback address, and all API requests require a session token.
 - When criteria are generated, the job description is sent to the configured model service; when candidates are evaluated, parsed resume text is sent to that model service. For phone screening, original recording content is sent to Volcano Engine ASR, and the transcript is sent to the model service. Evaluate each provider's data handling and compliance before use.
 - Feishu push sends the configured message content to Feishu servers through a Webhook. Keep the Webhook URL private; the masking boundary for outbound content is described in the Feishu push setup tip.
+- With Boss Connect enabled, the app uses a signed-in BOSS Zhipin session through the local boss-cli to read open positions, candidates, and attached resumes; HR-approved outreach actions are sent to BOSS Zhipin by boss-cli in the local Chrome and go through no other third-party service. This data is likewise stored in the local data directory.
 - Keep manual review for critical roles, campus hires, scarce talent, and high-risk rejections.
 
 ## Project layout
 
 | Directory | Description |
 | --- | --- |
-| `app/` | FastAPI service, screening & phone pipelines, model client, runtime tools |
+| `app/` | FastAPI service, screening & phone pipelines, model client, runtime tools, and `connectors/` recruiting-platform integrations |
 | `frontend/` | React + TypeScript frontend project (Vite build) |
+| `boss-cli/` | BOSS Zhipin automation CLI source (deployed separately, invoked as a subprocess) |
 | `packaging/` | PyInstaller and Inno Setup packaging config |
 | `scripts/` | Build and release verification scripts |
 | `docs/references/` | External background reference files (not part of the app) |
@@ -263,3 +286,5 @@ The script creates `dist/TalentHub.app` and `release/<version>/macos/TalentHub-m
 ## Limitations
 
 Screening and phone-summarization accuracy depends on JD clarity, resume/recording parsability, model and ASR capability, service stability, and role criteria. Resume screening uses evidence checks for tiering; phone summaries use a senior-recruiter prompt, produce structured results, and remain subject to HR review. Protected-attribute filtering, prompt constraints, and format-based redaction do not replace human review. The system cannot promise zero errors, and final hiring decisions must be made by authorized personnel.
+
+Boss Connect operates a BOSS Zhipin account through automation, so it may be affected by that platform's terms of service, account risk controls, and interface changes. Message wording, sending frequency, and candidate communication are the operator's responsibility; the app only guarantees that approved actions are executed as reviewed and makes no commitment about platform-side delivery or account status. Candidate information obtained from the platform is personal information, and its use must comply with applicable laws and your organization's policies.

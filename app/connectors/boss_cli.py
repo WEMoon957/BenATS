@@ -91,6 +91,27 @@ class BossCliConnector:
         """读取已沟通候选人列表（`boss list`）。"""
         return self._parse_candidate_lines(self.run("list"))
 
+    def list_unread_contacts(self) -> list[dict]:
+        """读取未读候选人列表（`boss list --unread`，即对方发来新消息的人），返回姓名、意向岗位与最新消息。"""
+        out = self.run("list", "--unread")
+        contacts: list[dict] = []
+        for line in out.splitlines():
+            match = re.match(r"^\s*\d+\.\s+([^｜]+)｜(.*)$", line)
+            if not match:
+                continue
+            name = match.group(1).strip()
+            if not name:
+                continue
+            parts = [part.strip() for part in match.group(2).split("｜")]
+            job = parts[0] if parts else ""
+            message = ""
+            for part in parts[1:]:
+                if part.startswith("消息:"):
+                    message = part[len("消息:"):].strip()
+                    break
+            contacts.append({"name": name, "job": job, "message": message})
+        return contacts
+
     def download_resume(self, candidate_name: str) -> Path:
         """下载候选人附件简历，返回本地文件路径（`boss download-resume`）。"""
         out = self.run("download-resume", candidate_name)
@@ -103,6 +124,20 @@ class BossCliConnector:
         if not path.is_file():
             raise BossCliError(f"附件简历文件不存在：{path}")
         return path
+
+    def preview_resume(self, candidate_name: str) -> str:
+        """预览在线简历并返回 OCR 正文文本（`boss preview`）。
+
+        前置条件：当前已在「推荐 / 深度搜索 / 常规搜索」页且列表已加载。
+        在线简历每日可查看次数有限，调用方需按需使用。
+        """
+        out = self.run("preview", candidate_name)
+        match = re.search(r"在线简历 OCR 正文：\s*(.*?)(?:\n\s*说明：|$)", out, re.DOTALL)
+        if match and match.group(1).strip():
+            return match.group(1).strip()
+        if "简历预览截图" in out and "在线简历 OCR 正文" not in out:
+            raise BossCliError("在线简历 OCR 未启用，无法获取简历文本。")
+        raise BossCliError(f"未能从 boss-cli 输出解析在线简历文本：{out.strip()[:200]}")
 
     @staticmethod
     def _parse_candidate_lines(out: str) -> list[dict]:

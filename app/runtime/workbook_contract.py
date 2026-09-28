@@ -23,6 +23,7 @@ DEFAULT_HEADERS_PER_SHEET = {
         "推荐顺序",
         "候选人",
         "结论",
+        "评分摘要",
         "一句话判定",
         "当前/最近公司",
         "当前/最近岗位",
@@ -110,12 +111,14 @@ ROW_KEY_FIELD_PER_SHEET = {
 }
 
 CONCLUSION_VALUES = (
+    "S电话沟通",
     "A优先约面",
     "B电话确认",
     "C不推进",
 )
 
 CONCLUSION_FILL_COLORS = {
+    "S电话沟通": "B6D7A8",
     "A优先约面": "D9EAD3",
     "B电话确认": "FFF2CC",
     "C不推进": "F4CCCC",

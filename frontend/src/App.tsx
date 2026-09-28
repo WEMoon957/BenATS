@@ -16,6 +16,8 @@ import { Toast } from "./ui/Toast";
 import { ScreeningView } from "./views/ScreeningView";
 import { PhoneView } from "./views/PhoneView";
 import { BossView } from "./views/BossView";
+import { AttendanceView } from "./views/AttendanceView";
+import { CandidateView } from "./views/CandidateView";
 
 /** 视图名 → section id（与 src/router 的 SECTION_IDS 对应） */
 const VIEW_SECTIONS: Record<string, string> = {
@@ -25,6 +27,8 @@ const VIEW_SECTIONS: Record<string, string> = {
   results: "resultsView",
   phone: "phoneView",
   boss: "bossView",
+  attendance: "attendanceView",
+  candidates: "candidatesView",
 };
 
 /** 视图名 → body[data-view] 写入值（criteriaReview 对应 review） */
@@ -35,6 +39,8 @@ const VIEW_DATA_VIEW: Record<string, string> = {
   results: "results",
   phone: "phone",
   boss: "boss",
+  attendance: "attendance",
+  candidates: "candidates",
 };
 
 /** 任务状态 → 视图名（completed/有结果的 failed → results，waiting → criteriaReview，其余 → progress） */
@@ -74,7 +80,17 @@ export function App() {
   /** 切换视图：router.show（screening 的四个 section 归一到 "screening" 视图，phone 独立）+
    *  显示目标 section + 同步 body[data-view] 与本地镜像 */
   const navigate = useCallback((name: string) => {
-    routerShow(name === "phone" ? "phone" : name === "boss" ? "boss" : "screening");
+    routerShow(
+      name === "phone"
+        ? "phone"
+        : name === "boss"
+          ? "boss"
+          : name === "attendance"
+            ? "attendance"
+            : name === "candidates"
+              ? "candidates"
+              : "screening"
+    );
     const sectionId = VIEW_SECTIONS[name];
     if (sectionId) showSection(sectionId);
     document.body.dataset.view = VIEW_DATA_VIEW[name] ?? name;
@@ -250,8 +266,8 @@ export function App() {
     setToolStripOpen((open) => !open);
   };
 
-  /** 工具切换（phone → 重置并打开电话视图，boss → 打开招聘接入，screening → 重置筛选工作区） */
-  const switchTool = (tool: "screening" | "phone" | "boss") => {
+  /** 工具切换（phone → 重置并打开电话视图，boss → 打开招聘接入，attendance → 打开考勤，screening → 重置筛选工作区） */
+  const switchTool = (tool: "screening" | "phone" | "boss" | "attendance" | "candidates") => {
     setToolStripOpen(false);
     localStorage.setItem("talentHub.activeTool", tool);
     if (tool === "phone") {
@@ -261,6 +277,12 @@ export function App() {
     } else if (tool === "boss") {
       localStorage.removeItem("talentHub.lastCall");
       navigate("boss");
+    } else if (tool === "attendance") {
+      localStorage.removeItem("talentHub.lastCall");
+      navigate("attendance");
+    } else if (tool === "candidates") {
+      localStorage.removeItem("talentHub.lastCall");
+      navigate("candidates");
     } else {
       localStorage.removeItem("talentHub.lastCall");
       resetScreeningWorkspace();
@@ -286,13 +308,17 @@ export function App() {
         ? t("modelConnected", { model: String(state.settings.model ?? "") })
         : t("modelPending");
   const activeToolRaw = localStorage.getItem("talentHub.activeTool");
-  const activeTool = activeToolRaw === "phone" ? "phone" : activeToolRaw === "boss" ? "boss" : "screening";
+  const activeTool = activeToolRaw === "phone" ? "phone" : activeToolRaw === "boss" ? "boss" : activeToolRaw === "attendance" ? "attendance" : activeToolRaw === "candidates" ? "candidates" : "screening";
   const viewTitle =
     view === "boss"
       ? t("toolBoss")
-      : view !== null && view !== "phone" && view !== "setup" && state.currentJob
-        ? displayJobTitle(String(state.currentJob.title ?? ""))
-        : t("jobTitle");
+      : view === "attendance"
+        ? t("toolAttendance")
+        : view === "candidates"
+          ? t("toolCandidates")
+          : view !== null && view !== "phone" && view !== "setup" && state.currentJob
+            ? displayJobTitle(String(state.currentJob.title ?? ""))
+            : t("jobTitle");
 
   if (exited) {
     return (
@@ -370,6 +396,31 @@ export function App() {
               <svg aria-hidden="true" viewBox="0 0 24 24">
                 <path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 1 0-7.07-7.07l-1.5 1.5" />
                 <path d="M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 1 0 7.07 7.07l1.5-1.5" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              data-tool="attendance"
+              className={activeTool === "attendance" ? "active" : ""}
+              title={t("toolAttendance")}
+              aria-label={t("toolAttendance")}
+              onClick={() => switchTool("attendance")}
+            >
+              <svg aria-hidden="true" viewBox="0 0 24 24">
+                <rect x="3" y="5" width="18" height="16" rx="2" />
+                <path d="M8 3v4M16 3v4M3 10h18" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              data-tool="candidates"
+              className={activeTool === "candidates" ? "active" : ""}
+              title={t("toolCandidates")}
+              aria-label={t("toolCandidates")}
+              onClick={() => switchTool("candidates")}
+            >
+              <svg aria-hidden="true" viewBox="0 0 24 24">
+                <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
               </svg>
             </button>
           </div>
@@ -471,6 +522,8 @@ export function App() {
             resetSignal={phoneResetSignal}
           />
           <BossView onToast={showToast} />
+          <AttendanceView onToast={showToast} />
+          <CandidateView onToast={showToast} />
         </div>
       </main>
 

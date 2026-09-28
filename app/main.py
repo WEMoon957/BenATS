@@ -29,13 +29,19 @@ from .config import AppSettings, SettingsStore, app_data_dir
 from .feishu import build_test_message, send_message
 from .llm import LLMError, LLMRequestError, LLMResponseError, OpenAICompatibleClient, prompt_json
 from .models import CallField, CallSummary
-from .pipeline import EvaluationEngine, ROOT, ocr_status
+from .pipeline import CONCLUSION_ORDER, EvaluationEngine, ROOT, conclusion_grade, ocr_status
 from .repository import JobRepository
 from .runtime.phone_screening import CallProcessor, render_call_summary_markdown
 from .connectors.boss_cli import BossCliConnector, BossCliError
 from .connectors.imports import import_position
 from .connectors.outreach import OutreachAction, OutreachStore, execute_outreach
 from .connectors.automation import AutomationEngine, AutomationStore
+from .attendance.db import get_store as get_attendance_store
+from .attendance.routes import register_routes as register_attendance_routes
+from .attendance.sync import FeishuSyncEngine
+from .recruitment.db import get_store as get_recruitment_store
+from .recruitment.routes import register_routes as register_recruitment_routes
+from .recruitment.services import score_candidates
 
 
 MAX_FILE_BYTES = 50 * 1024 * 1024
@@ -129,6 +135,11 @@ _compare_cancels_lock = threading.Lock()
 _compare_cache: dict[str, tuple[str, CompareReport]] = {}
 
 
+def conclusion_rank(conclusion: str | None) -> int:
+    """横向对比排序：S 级整体在前，其次 A，再到 B/C；未知结论排最后。"""
+    return CONCLUSION_ORDER.get(conclusion, len(CONCLUSION_ORDER))
+
+
 def validate_compare_report(report: CompareReport, expected: set[str]) -> None:
     names = [item.candidate for item in report.ranking]
     if set(names) != expected:
@@ -159,7 +170,7 @@ def validated_compare_call(
                 for candidate in candidates
             }
             report.ranking.sort(key=lambda item: (
-                0 if conclusion_by_name.get(item.candidate) == "A优先约面" else 1,
+                conclusion_rank(conclusion_by_name.get(item.candidate)),
                 item.rank,
             ))
             for rank, item in enumerate(report.ranking, start=1):
@@ -279,12 +290,27 @@ class OutreachInput(BaseModel):
     remark: str = Field(default="", max_length=120)
 
 
+class ScoreCandidatesInput(BaseModel):
+    candidate_ids: list[int] | None = None
+
+
 def public_job(job: dict) -> dict:
-    return {
+    payload = {
         key: value
         for key, value in job.items()
         if key not in {"internal_trace", "resume_hashes"}
     }
+    # 结果预览统一补出等级机器值：仅记录 conclusion 的历史任务也在 API 出口得到同一份
+    # grade 字段，前端因此只按 grade 过滤、计数与配色，不解析结论文案。
+    results = payload.get("results")
+    if isinstance(results, list):
+        payload["results"] = [
+            item
+            if not isinstance(item, dict) or "grade" in item
+            else {**item, "grade": conclusion_grade(item.get("conclusion"))}
+            for item in results
+        ]
+    return payload
 
 
 def public_job_summary(job: dict) -> dict:
@@ -311,6 +337,7 @@ def public_call_summary(record: dict) -> dict:
         "updated_at": record.get("updated_at"),
         "archived_at": record.get("archived_at"),
         "item_count": len(record.get("items", [])),
+        "roster": record.get("roster", []),
     }
 
 
@@ -330,7 +357,8 @@ def create_app(data_dir: Path | None = None, app_token: str | None = None) -> Fa
     boss = BossCliConnector()
     outreaches = OutreachStore(root)
     automation_store = AutomationStore(root)
-    automation = AutomationEngine(repository, engine, boss, outreaches, automation_store)
+    recruitment_store = get_recruitment_store()
+    automation = AutomationEngine(repository, engine, boss, outreaches, automation_store, call_repository, recruitment_store)
     token = app_token or secrets.token_urlsafe(32)
     # React 前端构建产物目录（Vite 构建，需先 npm run build）
     static_dir = ROOT / "frontend" / "dist"
@@ -343,6 +371,11 @@ def create_app(data_dir: Path | None = None, app_token: str | None = None) -> Fa
     app.state.call_processor = call_processor
     app.state.automation = automation
     app.state.app_token = token
+    attendance_store = get_attendance_store()
+    app.state.attendance_store = attendance_store
+    feishu_sync = FeishuSyncEngine(attendance_store)
+    app.state.feishu_sync = feishu_sync
+    app.state.recruitment_store = recruitment_store
     # 每任务一把 asyncio 上传锁：串行化同一任务的并发上传，避免预留/元数据竞争
     upload_locks: dict[str, asyncio.Lock] = {}
     app.state.upload_locks = upload_locks
@@ -1048,6 +1081,29 @@ def create_app(data_dir: Path | None = None, app_token: str | None = None) -> Fa
             return outreaches.update(outreach_id, status="rejected")
         return await run_in_threadpool(_run)
 
+    @app.post("/api/boss/outreaches/approve-all")
+    async def approve_all_outreaches():
+        """一键发送：按列表顺序逐条执行全部待审核触达，返回发送与失败计数。"""
+
+        def _run():
+            sent = 0
+            failed = 0
+            for record in outreaches.list_records(archived=False):
+                if record.get("status") != "pending":
+                    continue
+                action = OutreachAction(**record["action"])
+                try:
+                    result = execute_outreach(boss, action)
+                except BossCliError as exc:
+                    outreaches.update(record["id"], status="failed", error=str(exc))
+                    failed += 1
+                    continue
+                outreaches.update(record["id"], status="sent", result=result, error="")
+                sent += 1
+            return {"sent": sent, "failed": failed}
+
+        return await run_in_threadpool(_run)
+
     @app.get("/api/boss/automation/status")
     async def automation_status():
         return {"running": automation.running}
@@ -1065,6 +1121,19 @@ def create_app(data_dir: Path | None = None, app_token: str | None = None) -> Fa
     async def automation_stop():
         automation.stop()
         return {"running": automation.running}
+
+    # ---- 招聘候选人预评分 ----
+
+    @app.post("/api/recruitment/candidates/score")
+    async def score_candidates_api(payload: ScoreCandidatesInput):
+        def _run():
+            return score_candidates(
+                recruitment_store, boss, repository, settings_store, payload.candidate_ids
+            )
+        return await run_in_threadpool(_run)
+
+    register_attendance_routes(app, attendance_store, feishu_sync)
+    register_recruitment_routes(app, recruitment_store)
 
     app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
     return app
@@ -1142,6 +1211,7 @@ def main() -> None:
     token = secrets.token_urlsafe(32)
     app = create_app(data_dir, token)
     app.state.automation.start()
+    app.state.feishu_sync.start()
     url = f"http://127.0.0.1:{port}/"
     if not args.no_browser:
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()

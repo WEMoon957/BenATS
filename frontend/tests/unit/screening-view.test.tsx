@@ -101,10 +101,10 @@ function completedJob(overrides: Record<string, unknown> = {}) {
     elapsed_seconds: 120,
     errors: [],
     results: [
-      { source_file: "a.pdf", candidate_name: "张三", conclusion: "A优先约面", one_line: "经验匹配", blockers: [], next_action: "约面" },
-      { source_file: "b.pdf", candidate_name: "李四", conclusion: "A优先约面", one_line: "成长快", blockers: [], next_action: "约面" },
-      { source_file: "c.pdf", candidate_name: "王五", conclusion: "B电话确认", one_line: "需确认", blockers: [], next_action: "电话" },
-      { source_file: "d.pdf", candidate_name: "赵六", conclusion: "C不推进", one_line: "方向不符", blockers: ["行业不符"], next_action: "不推进" },
+      { source_file: "a.pdf", candidate_name: "张三", conclusion: "A优先约面", grade: "A", one_line: "经验匹配", blockers: [], next_action: "约面" },
+      { source_file: "b.pdf", candidate_name: "李四", conclusion: "A优先约面", grade: "A", one_line: "成长快", blockers: [], next_action: "约面" },
+      { source_file: "c.pdf", candidate_name: "王五", conclusion: "B电话确认", grade: "B", one_line: "需确认", blockers: [], next_action: "电话" },
+      { source_file: "d.pdf", candidate_name: "赵六", conclusion: "C不推进", grade: "C", one_line: "方向不符", blockers: ["行业不符"], next_action: "不推进" },
     ],
     ...overrides,
   };
@@ -312,13 +312,14 @@ describe("results 视图", () => {
     const rv = document.getElementById("resultsView")!;
     await waitFor(() => expect(document.getElementById("resultActions")!.hidden).toBe(false));
 
-    // 汇总统计
+    // 汇总统计（新增 S 列后为 5 项）
     const stats = document.querySelectorAll("#resultSummary .summary-stat");
-    expect(stats).toHaveLength(4);
+    expect(stats).toHaveLength(5);
     expect(stats[0].querySelector("strong")!.textContent).toBe("4");
-    expect(stats[1].querySelector("strong")!.textContent).toBe("2");
-    expect(stats[2].querySelector("strong")!.textContent).toBe("1");
+    expect(stats[1].querySelector("strong")!.textContent).toBe("0");
+    expect(stats[2].querySelector("strong")!.textContent).toBe("2");
     expect(stats[3].querySelector("strong")!.textContent).toBe("1");
+    expect(stats[4].querySelector("strong")!.textContent).toBe("1");
 
     // 4 行结果
     expect(document.querySelectorAll("#resultsBody tr")).toHaveLength(4);

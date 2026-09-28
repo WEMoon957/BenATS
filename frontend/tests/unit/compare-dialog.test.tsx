@@ -3,8 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CompareDialog, type CompareCandidate } from "../../src/ui/CompareDialog";
 
 const candidates: CompareCandidate[] = [
-  { source_file: "a.pdf", candidate_name: "张三", conclusion: "A优先约面" },
-  { source_file: "b.pdf", candidate_name: "李四", conclusion: "B电话确认" },
+  { source_file: "a.pdf", candidate_name: "张三", conclusion: "A优先约面", grade: "A" },
+  { source_file: "b.pdf", candidate_name: "李四", conclusion: "B电话确认", grade: "B" },
 ];
 let fetchMock: ReturnType<typeof vi.fn>;
 

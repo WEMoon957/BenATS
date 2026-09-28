@@ -162,7 +162,7 @@ describe("顶栏动作", () => {
       status: "completed",
       completed: 1,
       total: 1,
-      results: [{ source_file: `${id}.pdf`, candidate_name: `候选人 ${title}`, conclusion: "A优先约面", blockers: [] }],
+      results: [{ source_file: `${id}.pdf`, candidate_name: `候选人 ${title}`, conclusion: "A优先约面", grade: "A", blockers: [] }],
       errors: [],
     });
     const jobA = makeJob("job-a", "A");
@@ -208,7 +208,7 @@ describe("顶栏动作", () => {
       status: "completed",
       completed: 1,
       total: 1,
-      results: [{ source_file: "a.pdf", candidate_name: "候选人 A", conclusion: "A优先约面", blockers: [] }],
+      results: [{ source_file: "a.pdf", candidate_name: "候选人 A", conclusion: "A优先约面", grade: "A", blockers: [] }],
       errors: [],
     };
     const missing = { id: "job-missing", title: "失效任务", status: "completed" };

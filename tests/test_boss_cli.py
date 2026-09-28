@@ -64,6 +64,20 @@ def test_list_contacts_parses_names_and_dedupes(monkeypatch):
     assert connector.list_contacts() == [{"name": "张三"}, {"name": "王五"}]
 
 
+def test_list_unread_contacts_parses_name_and_job(monkeypatch):
+    out = (
+        "未读筛选：共 2 人（已切换页面「未读」筛选）。\n"
+        "候选人明细：\n"
+        "1. 罗家美｜快餐店店员｜时间:14:49｜消息:国庆兼职吗\n"
+        "2. 王子｜新媒体运营总监｜时间:14:47｜消息:对方想发送附件简历给您，您是否同意\n"
+    )
+    connector = make_connector(monkeypatch, out)
+    assert connector.list_unread_contacts() == [
+        {"name": "罗家美", "job": "快餐店店员", "message": "国庆兼职吗"},
+        {"name": "王子", "job": "新媒体运营总监", "message": "对方想发送附件简历给您，您是否同意"},
+    ]
+
+
 def test_download_resume_parses_path(monkeypatch, tmp_path):
     resume = tmp_path / "张三-简历.pdf"
     resume.write_bytes(b"%PDF-1.4 fake")

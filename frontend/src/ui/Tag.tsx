@@ -2,7 +2,7 @@
 
 import type { HTMLAttributes, ReactNode } from "react";
 
-export type ConclusionGrade = "a" | "b" | "c";
+export type ConclusionGrade = "s" | "a" | "b" | "c";
 
 export interface TagProps extends HTMLAttributes<HTMLSpanElement> {
   grade: ConclusionGrade;

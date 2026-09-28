@@ -384,13 +384,13 @@ async function updateCandidateRemark(page: Page, remarkText: string): Promise<st
   await sleepRandom(200, 360);
 
   const filledOk = (await page.evaluate(
-    `((selector, expected) => {
+    `(() => {
+      const selector = ${JSON.stringify(textareaSel)};
+      const expected = ${JSON.stringify(nextRemark)};
       const el = document.querySelector(selector);
       if (!(el instanceof HTMLTextAreaElement)) return false;
       return (el.value ?? "").trim() === expected;
-    })`,
-    textareaSel,
-    nextRemark,
+    })()`,
   )) as boolean;
   if (!filledOk) {
     throw new Error('备注输入未生效，请重试。');

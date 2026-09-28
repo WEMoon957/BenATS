@@ -149,7 +149,12 @@ class EvaluationContractTests(unittest.TestCase):
         self.assertEqual(item.evidence.core_actions.quote, "")
 
     def test_short_conclusion_is_expanded_to_full_label(self) -> None:
-        for short, full in (("A", "A优先约面"), ("B", "B电话确认"), ("C", "C不推进")):
+        for short, full in (
+            ("S", "S电话沟通"),
+            ("A", "A优先约面"),
+            ("B", "B电话确认"),
+            ("C", "C不推进"),
+        ):
             with self.subTest(short=short):
                 item = evaluation(conclusion=short)
                 self.assertEqual(item.conclusion, full)
@@ -199,6 +204,74 @@ class EvaluationContractTests(unittest.TestCase):
         item = apply_hard_gate_guard(item, standard, source)
 
         self.assertEqual(item.conclusion, "A优先约面")
+
+    def test_scores_at_threshold_upgrade_to_s(self) -> None:
+        source = "候选人负责产品需求和交付闭环。"
+        item = evaluation(
+            evidence=matched_evidence(),
+            scores={"object_match": 9, "scenario_match": 8, "core_actions": 9, "ownership_depth": 8},
+        )
+
+        item = apply_evidence_guard(item, source)
+        item = apply_hard_gate_guard(item, criteria(), source)
+
+        self.assertEqual(item.conclusion, "S电话沟通")
+        self.assertEqual(item.next_action, "电话沟通")
+
+    def test_scores_below_threshold_keep_a(self) -> None:
+        source = "候选人负责产品需求和交付闭环。"
+        item = evaluation(
+            evidence=matched_evidence(),
+            scores={"object_match": 9, "scenario_match": 8, "core_actions": 9, "ownership_depth": 7},
+        )
+
+        item = apply_evidence_guard(item, source)
+        item = apply_hard_gate_guard(item, criteria(), source)
+
+        self.assertEqual(item.conclusion, "A优先约面")
+
+    def test_missing_scores_never_upgrade_to_s(self) -> None:
+        source = "候选人负责产品需求和交付闭环。"
+        item = evaluation(evidence=matched_evidence())
+
+        item = apply_evidence_guard(item, source)
+        item = apply_hard_gate_guard(item, criteria(), source)
+
+        self.assertEqual(item.conclusion, "A优先约面")
+
+    def test_b_does_not_upgrade_to_s(self) -> None:
+        source = "候选人负责产品需求和交付闭环。"
+        item = evaluation(
+            hard_gate=[HardGateVerdict(id="H1", status="unknown")],
+            evidence=matched_evidence(),
+            scores={"object_match": 9, "scenario_match": 9, "core_actions": 9, "ownership_depth": 9},
+        )
+        standard = criteria(hard_requirements=[RuleItem(id="H1", rule="本科")])
+
+        item = apply_evidence_guard(item, source)
+        item = apply_hard_gate_guard(item, standard, source)
+
+        self.assertEqual(item.conclusion, "B电话确认")
+
+    def test_negative_signal_does_not_veto_s(self) -> None:
+        source = "候选人负责产品需求和交付闭环，有一段空白期。"
+        standard = criteria(negative_signals=[RuleItem(id="N1", rule="较长空白期")])
+        item = evaluation(
+            evidence=matched_evidence(),
+            scores={"object_match": 9, "scenario_match": 9, "core_actions": 9, "ownership_depth": 9},
+        )
+
+        item = apply_evidence_guard(item, source)
+        item = apply_hard_gate_guard(item, standard, source)
+
+        self.assertEqual(item.conclusion, "S电话沟通")
+
+    def test_evaluation_prompt_defines_scores_contract(self) -> None:
+        prompt = evaluation_user_prompt(criteria(), "简历正文", "resume.pdf")
+
+        self.assertIn('"scores"', prompt)
+        self.assertIn("s_threshold", prompt)
+        self.assertIn("S 级由程序", prompt)
 
     def test_a_conditions_uncertain_downgrades_to_b(self) -> None:
         source = "候选人负责产品需求和交付闭环。"

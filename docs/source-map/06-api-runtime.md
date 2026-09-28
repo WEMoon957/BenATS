@@ -29,19 +29,22 @@ evaluation_started_at, updated_at, archived_at
 候选人结果依赖字段：
 
 ```text
-candidate_name, source_file, conclusion,
+candidate_name, source_file, conclusion, grade,
 one_line, blockers, next_action
 ```
 
-`conclusion` 当前是中文业务枚举，不是展示文案：
+`grade` 是前端唯一用于过滤、计数、对比勾选与徽章配色的机器值，取值 `S` / `A` / `B` / `C`。它由 `pipeline.result_preview()` 从结论派生；`main.public_job()` 对缺少该字段的历史结果在 API 出口补齐，因此持久化的 `job.json` 不需要迁移。
+
+`conclusion` 是后端业务枚举，前端只作为原文保留，不参与任何界面判断：
 
 ```text
+S电话沟通
 A优先约面
 B电话确认
 C不推进
 ```
 
-后端模型同时接受单字母缩写 `"A"`、`"B"`、`"C"`，在校验时自动展开为完整中文标签。前端统计和筛选使用精确匹配。若改为代码枚举或英文值，必须同步后端模型、证据守卫、排序、Excel、前端、对比逻辑和验证。
+后端模型同时接受单字母缩写 `"S"`、`"A"`、`"B"`、`"C"`，在校验时自动展开为完整中文标签（`S电话沟通 / A优先约面 / B电话确认 / C不推进`）。`conclusion_grade()` 取结论首字母并限定在 `S/A/B/C` 内，其余值按 C 处理。若改为代码枚举或英文值，必须同步后端模型、证据守卫、排序、Excel、前端、对比逻辑和验证。
 
 后端对可选字段显式返回 `null` 时归一为语义默认：候选人元信息字段与评估层级回退默认或空串；判定内容字段（`conclusion`、`one_line`、`next_action`）不套用语义默认，为空依旧校验失败。
 
@@ -52,7 +55,7 @@ C不推进
 ```text
 id, title, title_mode, job_title, job_id, soft_skill_focus, soft_skill_dimensions,
 status, stage, updated_at,
-archived_at, errors, items
+archived_at, errors, items, roster
 ```
 
 条目：
@@ -88,6 +91,26 @@ doubts, transcript
 - 切换当前任务后，响应必须再次检查 ID，防止旧请求污染新视图。
 
 修改详情 API 的负载大小或字段时，要考虑高频轮询成本。`GET /api/bootstrap` 和任务列表端点应继续返回摘要，不要无条件携带完整结果。
+
+### 11.5 招聘接入端点
+
+```text
+GET  /api/boss/positions                         职位列表（boss-cli `positions`）
+POST /api/boss/import                            拉取岗位 JD 与附件简历并新建任务
+POST /api/boss/outreaches                        新建触达草稿
+GET  /api/boss/outreaches                        列出未归档触达记录
+POST /api/boss/outreaches/{id}/approve           批准并发送（pending → sent / failed）
+POST /api/boss/outreaches/{id}/reject            否决（pending → rejected）
+POST /api/boss/outreaches/approve-all            按顺序发送全部待审核触达
+GET  /api/boss/automation/status                 引擎运行状态
+POST /api/boss/automation/run                    立即执行一轮
+POST /api/boss/automation/start / stop           启动 / 停止引擎
+```
+
+- 触达记录状态机为 `pending → approved/rejected → sent/failed`，只有 `pending` 可批准或否决，其余状态返回 409。
+- `BossCliError` 统一映射为 503，详情携带 boss-cli 的原始错误文本；发送失败写入记录的 `error` 字段，不改变筛选或电话任务状态。
+- 除 `/api/boss/positions` 外的端点都通过 `run_in_threadpool` 执行，避免进程调用阻塞事件循环。
+- `/api/boss/import` 与前端暂无入口，仅后端提供；界面当前只消费引擎状态与触达审核两个端点。
 
 ## 12. 并发与持久化交叉影响
 

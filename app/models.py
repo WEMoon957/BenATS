@@ -6,7 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
 
-Conclusion = Literal["A优先约面", "B电话确认", "C不推进"]
+Conclusion = Literal["S电话沟通", "A优先约面", "B电话确认", "C不推进"]
 EvidenceStatus = Literal["匹配", "待确认", "不匹配", "未体现"]
 
 PROTECTED_CANDIDATE_ATTRIBUTE_RE = re.compile(
@@ -40,6 +40,8 @@ class ScreeningCriteria(BaseModel):
     similar_wrong_profiles: list[str] = Field(default_factory=list)
     evaluation_notes: list[str] = Field(default_factory=list)
     bonus_signals: list[str] = Field(default_factory=list)
+    scoring_rubric: str = ""
+    s_threshold: int = 8
 
     @field_validator(
         "core_outputs", "target_objects", "required_scenarios", "allowed_adjacent",
@@ -186,6 +188,7 @@ class CandidateEvaluation(BaseModel):
     bonus_signal_hits: list[BonusSignalHit] = Field(default_factory=list)
     a_conditions_check: list[AClassCheck] = Field(default_factory=list)
     phone_questions: list[PhoneQuestion] = Field(default_factory=list)
+    scores: dict[str, int] = Field(default_factory=dict)
     source_file: str = ""
     guard_warnings: list[str] = Field(default_factory=list)
 
@@ -208,8 +211,25 @@ class CandidateEvaluation(BaseModel):
     @field_validator("conclusion", mode="before")
     @classmethod
     def expand_short_conclusion(cls, value):
-        mapping = {"A": "A优先约面", "B": "B电话确认", "C": "C不推进"}
+        mapping = {"S": "S电话沟通", "A": "A优先约面", "B": "B电话确认", "C": "C不推进"}
         return mapping.get(value, value)
+
+    @field_validator("scores", mode="before")
+    @classmethod
+    def coerce_scores(cls, value):
+        if not isinstance(value, dict):
+            return {}
+        core_dimensions = {"object_match", "scenario_match", "core_actions", "ownership_depth"}
+        result: dict[str, int] = {}
+        for key, raw in value.items():
+            if key not in core_dimensions:
+                continue
+            try:
+                num = int(raw)
+            except (TypeError, ValueError):
+                continue
+            result[key] = max(0, min(10, num))
+        return result
 
     @field_validator("candidate_name", "current_company", "current_role",
                      "contact_phone", "contact_email", "source_file",

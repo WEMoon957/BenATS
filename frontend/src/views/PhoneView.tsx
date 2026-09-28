@@ -854,6 +854,19 @@ export function PhoneView({
           </Button>
         </div>
       </header>
+      {(call?.roster || []).length > 0 && (
+        <div className="call-roster" id="callRoster">
+          <h4>{t("callRosterTitle")}</h4>
+          <ul>
+            {(call?.roster || []).map((entry, index) => (
+              <li key={`${entry.candidate_name}:${index}`}>
+                <strong>{String(entry.candidate_name || "")}</strong>
+                {entry.one_line ? <span>{String(entry.one_line)}</span> : null}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {itemCards}
       <div className="call-errors" id="callErrors" hidden={!errors.length}>
         {errors.join("\n")}

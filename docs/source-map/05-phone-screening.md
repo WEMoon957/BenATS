@@ -33,6 +33,8 @@ frontend/src/views/PhoneView.tsx 处理任务
 
 创建表单的软性关注项包含 8 个预设维度 chips 和自定义文本。预设 key 存入 `soft_skill_dimensions`，后端映射为中文规范名；自定义文本存入 `soft_skill_focus`。
 
+自动化同步的电话任务携带 `roster` 字段：筛选完成后由 `automation.sync_s_calls()` 为该任务包好「S电话沟通」名单（`candidate_name / conclusion / one_line / source_file`），前端电话详情页据此展示「S 级沟通名单」。手工创建的电话任务 `roster` 为空数组。
+
 「关联筛选岗位」下拉选项来自 `/api/jobs?scope=recent&limit=100`，即最近 100 个未归档岗位。选中岗位后，`importJobFocus()` 请求 `/api/jobs/<id>/criteria-json`，把 `bonus_signals` 填入自定义文本，并按 `SOFT_SKILL_KEYWORD_MAP` 勾选预设维度。该过程不调用模型，`job_id` 仅用于溯源。
 
 岗位联动的约束：

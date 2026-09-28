@@ -171,9 +171,9 @@ export async function captureCResumeIframeToFile(
       return false;
     }
 
-    await iframe.evaluate(`((el) => {
-      el.scrollIntoView({ block: "start", inline: "nearest" });
-    })`);
+    await iframe.evaluate(`(() => {
+      document.documentElement.scrollIntoView({ block: "start", inline: "nearest" });
+    })()`);
 
     const box = await iframe.boundingBox();
     if (!box) {

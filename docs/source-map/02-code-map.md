@@ -24,6 +24,10 @@
 | `app/runtime/call_state.py` | 电话任务与条目状态转换、中断收敛 | 电话处理、重试和取消 |
 | `app/runtime/speech_to_text.py` | 火山 ASR 请求、音频校验和转写渲染 | 电话处理、ASR 配置与验证 |
 | `app/runtime/phone_screening.py` | 电话转写编排、结构化整理、必填结构校验、narrative/Markdown 渲染和事实引用录音定位 | Call 状态、摘要文件、电话详情 |
+| `app/connectors/boss_cli.py` | 以子进程调用 boss-cli、解析其纯文本输出、`BOSSCLI_BIN` 覆盖与错误归一（`BossCliError`） | 招聘接入导入、触达执行、自动化引擎 |
+| `app/connectors/imports.py` | 职位 JD 与推荐候选人（含可下载的附件简历）导入为一个新任务的编排 | 招聘接入导入端点、任务材料 |
+| `app/connectors/outreach.py` | 触达动作数据类、草稿仓储（`JsonStore` 子类）与动作到 boss 命令的翻译执行 | 触达审核端点、自动化引擎 |
+| `app/connectors/automation.py` | 后台轮询引擎：职位/候选人/消息同步、触达结果回写、附件简历下载与筛选启动、S 级电话任务同步；处理状态持久化在 `automation.json` | 招聘接入界面、Job 与 Call 仓储 |
 | `frontend/src/` | React + TypeScript 前端；`App.tsx` 负责外壳和协调，`views/` 负责业务视图，`ui/` 负责对话框与基础组件 | 后端路由、字段、状态枚举和前端验证 |
 | `launcher.py` | PyInstaller 启动入口 | `app.main.main()`、打包配置 |
 | `start-app.bat` | 启动后端和 `vite build --watch`；前端依赖需已安装 | 本地开发启动 |

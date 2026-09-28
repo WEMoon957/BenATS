@@ -27,6 +27,7 @@ export type CallTask = Record<string, unknown> & {
   archived_at?: string;
   errors?: string[];
   items?: CallItem[];
+  roster?: Array<{ candidate_name?: string; conclusion?: string; one_line?: string; source_file?: string }>;
 };
 
 /** 电话条目 */

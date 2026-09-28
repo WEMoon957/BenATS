@@ -6,7 +6,7 @@ export interface ViewHooks {
   exit?: () => void;
 }
 
-const SECTION_IDS = ["setupView", "progressView", "criteriaReviewView", "resultsView", "phoneView", "bossView"];
+const SECTION_IDS = ["setupView", "progressView", "criteriaReviewView", "resultsView", "phoneView", "bossView", "attendanceView", "candidatesView"];
 const views = new Map<string, ViewHooks>();
 let current: string | null = null;
 

@@ -14,7 +14,8 @@ import { useDialogAnimation } from "./useDialogAnimation";
 export interface CompareCandidate {
   source_file: string;
   candidate_name?: string;
-  conclusion?: string;
+  /** 结论等级机器值：S / A / B / C */
+  grade?: string;
 }
 
 export interface CompareRankingItem {
@@ -31,10 +32,11 @@ export interface CompareDialogProps {
   onClose: () => void;
 }
 
-/** 结论 → 徽章等级/文案（A→a、B→b、其余→c） */
-function conclusionMeta(conclusion: string): { grade: ConclusionGrade; label: string } {
-  if (conclusion.startsWith("A")) return { grade: "a", label: t("conclusionA") };
-  if (conclusion.startsWith("B")) return { grade: "b", label: t("conclusionB") };
+/** 结论等级 → 徽章等级/文案（S→s、A→a、B→b、其余→c） */
+function gradeMeta(grade: string): { grade: ConclusionGrade; label: string } {
+  if (grade === "S") return { grade: "s", label: t("conclusionS") };
+  if (grade === "A") return { grade: "a", label: t("conclusionA") };
+  if (grade === "B") return { grade: "b", label: t("conclusionB") };
   return { grade: "c", label: t("conclusionC") };
 }
 
@@ -183,8 +185,8 @@ export function CompareDialog({ open, jobId, candidates, onClose }: CompareDialo
                 <ol className="compare-list">
                   {ranking.map((item) => {
                     const { name, file } = parseCandidate(item.candidate);
-                    const conclusion = candidates.find((c) => c.source_file === file)?.conclusion ?? "";
-                    const badge = conclusion ? conclusionMeta(conclusion) : null;
+                    const grade = candidates.find((c) => c.source_file === file)?.grade ?? "";
+                    const badge = grade ? gradeMeta(grade) : null;
                     return (
                       <li className="compare-row" key={item.rank}>
                         <span className="compare-rank" title={item.rank === 1 ? t("compareFirst") : undefined}>
