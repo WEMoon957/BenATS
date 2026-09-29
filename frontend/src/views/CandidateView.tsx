@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api/client";
 import { t } from "../i18n";
-import { registerView } from "../router";
 import { Button } from "../ui/Button";
 
 export interface CandidateViewProps {
@@ -19,6 +18,7 @@ interface Candidate {
   stage_label: string;
   pre_score: string;
   pre_score_reason: string;
+  score_detail: string;
   phone: string;
   note: string;
 }
@@ -29,10 +29,10 @@ interface StageItem {
 }
 
 const COLUMNS: { key: string; label: string; stages: string[] }[] = [
-  { key: "discovered", label: "待评分", stages: ["discovered", "scored"] },
-  { key: "greeting_pending", label: "待打招呼", stages: ["greeting_pending"] },
+  { key: "greeting_pending", label: "待打招呼", stages: ["discovered", "greeting_pending"] },
   { key: "greeted", label: "已打招呼", stages: ["greeted"] },
-  { key: "followup", label: "跟进中", stages: ["resume_received", "screening", "screened"] },
+  { key: "resume_received", label: "待评分", stages: ["resume_received"] },
+  { key: "screening", label: "筛选中", stages: ["screening", "screened"] },
   { key: "interviewing", label: "面试中", stages: ["interviewing"] },
   { key: "done", label: "已结束", stages: ["offered", "rejected", "skipped"] },
 ];
@@ -64,19 +64,46 @@ function CandidateCard({
   onMove: (id: number, stage: string) => void;
   onDelete: (candidate: Candidate) => void;
 }) {
+  const [open, setOpen] = useState(false);
+  let detail: Record<string, unknown> | null = null;
+  try {
+    detail = candidate.score_detail ? (JSON.parse(candidate.score_detail) as Record<string, unknown>) : null;
+  } catch {
+    detail = null;
+  }
+  const questions = Array.isArray(detail?.phone_questions) ? (detail!.phone_questions as string[]) : [];
   return (
     <li className={`rec-card ${scoreClass(candidate.pre_score)}`}>
-      <div className="rec-card-head">
+      <div className="rec-card-head" onClick={() => setOpen(!open)} role="button" tabIndex={0}>
         {candidate.stage === "greeting_pending" && (
-          <input type="checkbox" checked={selected} onChange={() => onToggle(candidate.id)} aria-label={candidate.name} />
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={(e) => { e.stopPropagation(); onToggle(candidate.id); }}
+            onClick={(e) => e.stopPropagation()}
+            aria-label={candidate.name}
+          />
         )}
         <strong>{candidate.name}</strong>
         {candidate.pre_score && <span className="rec-score">{candidate.pre_score}</span>}
+        {detail && <span className="rec-score rec-score-total">{String(detail.total ?? "")}</span>}
       </div>
       <div className="rec-card-meta">
         <span>{candidate.job_keyword || "未关联岗位"}</span>
       </div>
       {candidate.pre_score_reason && <p className="rec-card-reason">{candidate.pre_score_reason}</p>}
+      {open && detail && (
+        <div className="rec-card-detail">
+          {detail.highlight ? <p className="rec-detail-line"><strong>亮点：</strong>{String(detail.highlight)}</p> : null}
+          {detail.risk ? <p className="rec-detail-line"><strong>风险：</strong>{String(detail.risk)}</p> : null}
+          {questions.length > 0 && (
+            <div className="rec-detail-questions">
+              <strong>电话必问：</strong>
+              <ol>{questions.map((q, i) => <li key={i}>{q}</li>)}</ol>
+            </div>
+          )}
+        </div>
+      )}
       <div className="rec-card-actions">
         <select
           value={candidate.stage}
@@ -116,10 +143,6 @@ export function CandidateView({ onToast }: CandidateViewProps) {
   }, [onToast]);
 
   useEffect(() => {
-    registerView("candidates", { enter: () => void load() });
-  }, [load]);
-
-  useEffect(() => {
     void load();
   }, [load]);
 
@@ -135,11 +158,11 @@ export function CandidateView({ onToast }: CandidateViewProps) {
   const scoreAll = async () => {
     setBusy(true);
     try {
-      const r = await api<{ ok: boolean; detail?: string; scored?: number; skipped?: number; failed?: number }>(
+      const r = await api<{ ok: boolean; detail?: string; scored?: number; failed?: number }>(
         "/api/recruitment/candidates/score",
         { method: "POST", body: JSON.stringify({ candidate_ids: null }) },
       );
-      if (r.ok) onToast(t("recScoreDone", { scored: r.scored ?? 0, skipped: r.skipped ?? 0, failed: r.failed ?? 0 }));
+      if (r.ok) onToast(t("recScoreDone", { scored: r.scored ?? 0, passed: 0, rejected: 0, failed: r.failed ?? 0 }));
       else onToast(r.detail || t("recScoreFailed"));
       await load();
     } catch (error) {
@@ -187,7 +210,7 @@ export function CandidateView({ onToast }: CandidateViewProps) {
   const pendingCount = candidates.filter((c) => c.stage === "greeting_pending").length;
 
   return (
-    <section id="candidatesView" className="rec-view">
+    <div className="rec-view">
       <div className="rec-toolbar">
         <Button variant="primary" busy={busy} onClick={() => void scoreAll()}>
           {t("recScoreAll")}
@@ -239,7 +262,7 @@ export function CandidateView({ onToast }: CandidateViewProps) {
           onToast={onToast}
         />
       )}
-    </section>
+    </div>
   );
 }
 

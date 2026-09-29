@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api/client";
 import { onChange, t } from "../i18n";
-import { registerView } from "../router";
 import { Button } from "../ui/Button";
 import { StatusDot } from "../ui/StatusDot";
 
@@ -52,9 +51,26 @@ function statusLabel(status: string): string {
   return status;
 }
 
+function actionDetail(action: OutreachAction): string {
+  if (action.kind === "action" && action.command === "request-attachment-resume") {
+    return "将发送默认话术「方便发一份你的简历过来吗？」";
+  }
+  if (action.kind === "action" && action.command === "agree-resume") {
+    return "将同意接收对方发来的附件简历";
+  }
+  if (action.kind === "send") {
+    return action.text ? `将发送：${action.text}` : "将发送消息";
+  }
+  if (action.kind === "action" && action.remark) {
+    return `备注：${action.remark}`;
+  }
+  return "点击 BOSS「打招呼」按钮";
+}
+
 export function BossView({ onToast }: BossViewProps) {
   const [running, setRunning] = useState(false);
   const [outreaches, setOutreaches] = useState<OutreachRecord[]>([]);
+  const [candidates, setCandidates] = useState<{ stage: string }[]>([]);
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [approvingAll, setApprovingAll] = useState(false);
@@ -63,12 +79,14 @@ export function BossView({ onToast }: BossViewProps) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [status, list] = await Promise.all([
+      const [status, list, cands] = await Promise.all([
         api<AutomationStatus>("/api/boss/automation/status"),
         api<{ outreaches: OutreachRecord[] }>("/api/boss/outreaches"),
+        api<{ candidates: { stage: string }[] }>("/api/recruitment/candidates"),
       ]);
       setRunning(status.running);
       setOutreaches(list.outreaches || []);
+      setCandidates(cands.candidates || []);
     } catch (error) {
       onToast((error as Error).message);
     } finally {
@@ -77,7 +95,7 @@ export function BossView({ onToast }: BossViewProps) {
   }, [onToast]);
 
   useEffect(() => {
-    registerView("boss", { enter: () => void load() });
+    void load();
   }, [load]);
 
   useEffect(() => {
@@ -139,8 +157,17 @@ export function BossView({ onToast }: BossViewProps) {
   const pending = outreaches.filter((item) => item.status === "pending");
   const processed = outreaches.filter((item) => item.status !== "pending");
 
+  const stageCount = (stages: string[]) => candidates.filter((c) => stages.includes(c.stage)).length;
+  const flow = [
+    { label: "拉候选人", count: stageCount(["discovered", "greeting_pending"]) },
+    { label: "已打招呼", count: stageCount(["greeted"]) },
+    { label: "已收简历", count: stageCount(["resume_received"]) },
+    { label: "已评分", count: stageCount(["screening", "screened"]) },
+    { label: "面试/结束", count: stageCount(["interviewing", "offered", "rejected", "skipped"]) },
+  ];
+
   return (
-    <section id="bossView" className="boss-view">
+    <div className="boss-view">
       <div className="boss-panel">
         <div className="subsection-heading">
           <h3>{t("bossAutomation")}</h3>
@@ -164,6 +191,31 @@ export function BossView({ onToast }: BossViewProps) {
       </div>
 
       <div className="boss-panel">
+        <div className="subsection-heading"><h3>触达方案 · 新媒体运营总监</h3></div>
+        <p className="boss-lead">系统自动完成「拉候选人 → 打招呼 → 求简历 → 下载评分」，你只需审核触达动作、看评分结果。</p>
+        <div className="outreach-flow">
+          {flow.map((step, i) => (
+            <div className="outreach-flow-item" key={step.label}>
+              {i > 0 && <span className="outreach-flow-arrow">→</span>}
+              <div className="outreach-flow-step">
+                <span className="outreach-flow-count">{step.count}</span>
+                <span className="outreach-flow-label">{step.label}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+        <ul className="outreach-plan">
+          <li><strong>打招呼</strong>：对「拉候选人」自动点击 BOSS「打招呼」（消耗打招呼次数）。</li>
+          <li><strong>求简历</strong>：打招呼后对方未发简历时，自动发默认话术「方便发一份你的简历过来吗？」。</li>
+          <li><strong>下载 + 评分</strong>：对方发来简历后自动下载进系统并评分，S / A 级进入电话约谈。</li>
+        </ul>
+        <div className={`boss-guide${pending.length > 0 ? " is-attention" : ""}`}>
+          <strong>你现在要做的：</strong>
+          {pending.length > 0 ? `有 ${pending.length} 个触达动作待你审核（见下方）` : "暂无待审核，系统自动运行中"}
+        </div>
+      </div>
+
+      <div className="boss-panel">
         <div className="subsection-heading">
           <h3>{t("bossOutreachReview")}</h3>
           <span>{t("bossPendingCount", { count: pending.length })}</span>
@@ -183,13 +235,12 @@ export function BossView({ onToast }: BossViewProps) {
             {pending.map((item) => (
               <li className="boss-outreach-item" key={item.id}>
                 <div className="boss-outreach-main">
-                  <strong>{item.action.target}</strong>
-                  <span className="boss-outreach-kind">{kindLabel(item.action)}</span>
-                  <span className="boss-outreach-meta">
-                    {item.action.job_keyword ? `· ${item.action.job_keyword}` : ""}
-                    {item.action.text ? `· ${item.action.text}` : ""}
-                    {item.action.remark ? `· ${item.action.remark}` : ""}
-                  </span>
+                  <div className="boss-outreach-title">
+                    <strong>{item.action.target}</strong>
+                    <span className="boss-outreach-kind">{kindLabel(item.action)}</span>
+                  </div>
+                  {item.action.job_keyword ? <span className="boss-outreach-meta">岗位：{item.action.job_keyword}</span> : null}
+                  <span className="boss-outreach-detail">{actionDetail(item.action)}</span>
                 </div>
                 <div className="boss-outreach-actions">
                   <Button variant="primary" busy={busyId === item.id} onClick={() => void decide(item.id, "approve")}>
@@ -223,6 +274,6 @@ export function BossView({ onToast }: BossViewProps) {
           </>
         )}
       </div>
-    </section>
+    </div>
   );
 }

@@ -84,6 +84,8 @@ CREATE TABLE IF NOT EXISTS candidate (
     pre_score TEXT NOT NULL DEFAULT '',
     pre_score_reason TEXT NOT NULL DEFAULT '',
     pre_scored_at TEXT,
+    score_detail TEXT NOT NULL DEFAULT '',
+    call_score TEXT NOT NULL DEFAULT '',
     phone TEXT NOT NULL DEFAULT '',
     note TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
@@ -93,6 +95,23 @@ CREATE TABLE IF NOT EXISTS candidate (
 
 CREATE INDEX IF NOT EXISTS idx_candidate_stage ON candidate(stage);
 CREATE INDEX IF NOT EXISTS idx_candidate_job ON candidate(job_keyword);
+
+CREATE TABLE IF NOT EXISTS job_rubric (
+    job_keyword TEXT PRIMARY KEY,
+    rubric TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS plan (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_keyword TEXT NOT NULL,
+    mode TEXT NOT NULL DEFAULT 'passive',
+    state TEXT NOT NULL DEFAULT 'draft',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_plan_state ON plan(state);
 """
 
 
@@ -112,6 +131,14 @@ class RecruitmentStore:
         conn = self._connect()
         try:
             conn.executescript(_SCHEMA)
+            try:
+                conn.execute("ALTER TABLE candidate ADD COLUMN score_detail TEXT NOT NULL DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("ALTER TABLE candidate ADD COLUMN call_score TEXT NOT NULL DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass
             conn.commit()
         finally:
             conn.close()
@@ -151,6 +178,17 @@ class RecruitmentStore:
                 raise
             finally:
                 conn.close()
+
+    def get_rubric(self, job_keyword: str) -> str:
+        row = self.query_one("SELECT rubric FROM job_rubric WHERE job_keyword = ?", (job_keyword,))
+        return str(row["rubric"]) if row else ""
+
+    def set_rubric(self, job_keyword: str, rubric: str) -> None:
+        self.execute(
+            "INSERT INTO job_rubric (job_keyword, rubric, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(job_keyword) DO UPDATE SET rubric = excluded.rubric, updated_at = excluded.updated_at",
+            (job_keyword, rubric, _now()),
+        )
 
 
 _store: RecruitmentStore | None = None

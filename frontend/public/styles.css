@@ -942,6 +942,81 @@ html:has(.preview-backdrop) {
 .rec-delete:hover { background: var(--red-soft); color: var(--red); }
 .rec-empty { padding: 10px 0; color: var(--muted); font-size: 10px; text-align: center; list-style: none; }
 
+.rec-card-head { cursor: pointer; }
+.rec-score-total { margin-left: 4px; background: var(--line-strong); color: var(--ink); }
+.rec-card-detail { margin-top: 8px; padding: 8px; border-radius: 6px; background: var(--panel, #f8fafc); font-size: 11px; line-height: 1.5; }
+.rec-detail-line { margin: 4px 0; }
+.rec-detail-questions ol { margin: 4px 0 0 18px; padding: 0; }
+.rec-detail-questions li { margin: 2px 0; }
+
+/* ---- 岗位专属加权评分 ---- */
+
+.rubric-view { width: min(1120px, 100%); margin: 0 auto; padding-top: 2vh; }
+.rubric-select { width: 100%; height: 40px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 6px; background: #fff; color: var(--ink); font-size: 12px; }
+.rubric-jd { width: 100%; min-height: 140px; padding: 12px; border: 1px solid var(--line-strong); border-radius: 6px; background: #fff; color: var(--ink); font-size: 12px; line-height: 1.6; resize: vertical; }
+.rubric-veto { margin: 12px 0 0; padding: 8px 12px; border-radius: 6px; background: var(--red-soft); color: var(--red); font-size: 11px; }
+.rubric-grade { display: inline-block; min-width: 22px; padding: 1px 6px; border-radius: 99px; color: #fff; font-size: 10px; text-align: center; }
+
+/* ---- 招聘工作台 ---- */
+
+.recruitment-view { width: min(1200px, 100%); margin: 0 auto; padding-top: 2vh; }
+.wb-tabs { display: flex; gap: 8px; margin-bottom: 16px; border-bottom: 1px solid var(--line-strong); }
+.wb-tab { padding: 10px 18px; border: none; background: none; color: var(--muted); font-size: 13px; cursor: pointer; border-bottom: 2px solid transparent; }
+.wb-tab.active { color: var(--ink); font-weight: 600; border-bottom-color: var(--accent, #315fae); }
+.wb-body { min-height: 60vh; }
+
+/* ---- 触达方案概览 ---- */
+
+.outreach-flow { display: flex; align-items: center; gap: 6px; margin: 14px 0 12px; flex-wrap: wrap; }
+.outreach-flow-item { display: flex; align-items: center; gap: 6px; }
+.outreach-flow-arrow { color: var(--muted); font-size: 14px; }
+.outreach-flow-step { display: flex; flex-direction: column; align-items: center; min-width: 64px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: #fff; }
+.outreach-flow-count { font-size: 20px; font-weight: 700; color: var(--ink); }
+.outreach-flow-label { font-size: 10px; color: var(--muted); margin-top: 2px; }
+.outreach-plan { margin: 0; padding: 0 0 0 18px; color: var(--muted); font-size: 11px; line-height: 1.7; }
+.outreach-plan li { margin: 2px 0; }
+.boss-outreach-title { display: flex; align-items: center; gap: 8px; }
+.boss-outreach-detail { display: block; margin-top: 4px; font-size: 11px; color: var(--ink); line-height: 1.5; }
+.boss-outreach-meta { display: block; margin-top: 2px; font-size: 10px; color: var(--muted); }
+.boss-guide { margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: var(--panel, #f8fafc); font-size: 12px; color: var(--ink); }
+.boss-guide.is-attention { background: #fff7e6; border: 1px solid #f0c36a; color: #7a4d00; }
+
+/* ---- 招聘作业台四步向导 ---- */
+.wizard-steps { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 16px; padding: 0; list-style: none; }
+.wizard-steps li { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--paper); color: var(--muted); font-size: 12px; }
+.wizard-steps li.is-active { border-color: var(--blue); color: var(--ink); }
+.wizard-steps li.is-done { color: var(--ink); }
+.wizard-step-num { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 999px; background: var(--surface-muted); color: var(--muted); font-size: 11px; font-weight: var(--font-semibold); }
+.wizard-steps li.is-active .wizard-step-num { background: var(--blue); color: #fff; }
+.wizard-steps li.is-done .wizard-step-num { background: #1e7a35; color: #fff; }
+.wizard-checks { margin: 0; padding: 0; list-style: none; }
+.wizard-checks li { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
+.wizard-checks li:last-child { border-bottom: none; }
+.wizard-check-label { flex: 0 0 96px; color: var(--ink); font-weight: var(--font-medium); }
+.wizard-check-detail { color: var(--muted); font-size: 11px; }
+
+/* ---- 电话约谈评分 ---- */
+
+.calls-view { display: grid; grid-template-columns: 340px 1fr; gap: 16px; align-items: start; }
+.calls-detail { position: sticky; top: 12px; }
+.call-highlight { padding: 10px 12px; border-radius: 8px; background: var(--panel, #f8fafc); font-size: 12px; line-height: 1.6; margin-bottom: 12px; }
+.call-highlight p { margin: 4px 0; }
+.call-question-list { list-style: none; margin: 0; padding: 0; }
+.call-question { padding: 12px 0; border-bottom: 1px solid var(--line-strong); }
+.call-question-text { font-size: 12px; line-height: 1.5; margin-bottom: 8px; }
+.call-question-score { display: flex; gap: 6px; margin-bottom: 6px; }
+.call-score-btn { width: 30px; height: 30px; border: 1px solid var(--line-strong); border-radius: 6px; background: #fff; color: var(--ink); font-size: 12px; cursor: pointer; }
+.call-score-btn.active { background: var(--accent, #315fae); border-color: var(--accent, #315fae); color: #fff; }
+.call-question-note { width: 100%; padding: 6px 8px; border: 1px solid var(--line-strong); border-radius: 6px; font-size: 12px; }
+.call-conclusion { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line-strong); }
+.call-avg { font-size: 13px; margin-bottom: 10px; }
+.call-conclusion-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+.call-concl-btn { padding: 6px 12px; border: 1px solid var(--line-strong); border-radius: 6px; background: #fff; color: var(--ink); font-size: 12px; cursor: pointer; }
+.call-concl-btn.active.is-pass { background: #1e7a35; border-color: #1e7a35; color: #fff; }
+.call-concl-btn.active.is-reject { background: #aa3a30; border-color: #aa3a30; color: #fff; }
+.call-concl-btn.active.is-pending { background: #a15c05; border-color: #a15c05; color: #fff; }
+.call-note { width: 100%; min-height: 60px; padding: 8px; border: 1px solid var(--line-strong); border-radius: 6px; font-size: 12px; resize: vertical; }
+
 @media (max-width: 720px) {
   .att-layout { grid-template-columns: 1fr; }
   .att-nav { flex-direction: row; overflow-x: auto; }

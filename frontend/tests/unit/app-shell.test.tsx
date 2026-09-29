@@ -64,7 +64,7 @@ async function waitBootstrap() {
 }
 
 describe("bootstrap 与顶栏渲染", () => {
-  it("bootstrap 成功后渲染顶栏、隐藏 loading、进入默认 setup 视图并写入 state", async () => {
+  it("bootstrap 成功后渲染顶栏、隐藏 loading、进入默认招聘工作台视图并写入 state", async () => {
     fetchMock.mockImplementation((url: string) => {
       if (url === "/api/bootstrap") return Promise.resolve(jsonResponse(readySettings()));
       return Promise.resolve(jsonResponse({}));
@@ -83,14 +83,14 @@ describe("bootstrap 与顶栏渲染", () => {
     expect(state.settings).toEqual(readySettings().settings);
     expect(state.jobs).toHaveLength(1);
     expect(state.historyTotals.recent).toBe(1);
-    expect(localStorage.getItem("talentHub.activeTool")).toBe("screening");
+    expect(localStorage.getItem("talentHub.activeTool")).toBe("recruitment");
 
-    // 默认视图：仅 setupView 可见
-    expect(document.getElementById("setupView")!.hidden).toBe(false);
-    for (const id of ["progressView", "criteriaReviewView", "resultsView", "phoneView"]) {
+    // 默认视图：仅招聘工作台可见
+    expect(document.getElementById("recruitmentView")!.hidden).toBe(false);
+    for (const id of ["setupView", "progressView", "criteriaReviewView", "resultsView", "phoneView"]) {
       expect(document.getElementById(id)!.hidden, id).toBe(true);
     }
-    expect(document.body.dataset.view).toBe("setup");
+    expect(document.body.dataset.view).toBe("recruitment");
   });
 
   it("bootstrap 分流：activeTool=phone 时进入电话视图并隐藏 viewTitle", async () => {
@@ -122,13 +122,13 @@ describe("bootstrap 与顶栏渲染", () => {
     expect(state.currentJob?.id).toBe("j-completed");
   });
 
-  it("bootstrap 失败：展示 toast 并回落 setup 视图", async () => {
+  it("bootstrap 失败：展示 toast 并回落招聘工作台视图", async () => {
     fetchMock.mockRejectedValue(new Error("服务不可用"));
     render(<App />);
 
     await waitBootstrap();
     expect(screen.getByText("服务不可用")).toBeInTheDocument();
-    expect(document.getElementById("setupView")!.hidden).toBe(false);
+    expect(document.getElementById("recruitmentView")!.hidden).toBe(false);
     expect(state.settings).toBeNull();
   });
 });

@@ -112,6 +112,19 @@ POST /api/boss/automation/start / stop           启动 / 停止引擎
 - 除 `/api/boss/positions` 外的端点都通过 `run_in_threadpool` 执行，避免进程调用阻塞事件循环。
 - `/api/boss/import` 与前端暂无入口，仅后端提供；界面当前只消费引擎状态与触达审核两个端点。
 
+### 11.6 招聘作业（Plan）端点
+
+```text
+GET  /api/recruitment/plans                      列出招聘作业
+POST /api/recruitment/plans                      创建作业草稿（job_keyword、mode）
+GET  /api/recruitment/plans/{id}/checks          执行前检查项（BOSS 接入 / 岗位 / 模型配置）
+POST /api/recruitment/plans/{id}/start           检查通过后置 running 并触发引擎一轮
+POST /api/recruitment/plans/{id}/stop            停止作业
+```
+
+- 作业状态机为 `draft → running → stopped`；`start` 只在执行前检查全部通过后推进状态，阻塞时返回 409 与首个未通过项。
+- 启动后复用 `AutomationEngine` 的被动咨询流程，不直接调用 boss-cli 发送。
+
 ## 12. 并发与持久化交叉影响
 
 ### 12.1 并发层级

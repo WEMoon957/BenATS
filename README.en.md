@@ -73,7 +73,7 @@ Currently supported modules:
 | **Automatic position import** | Pulls open positions on a schedule and creates a screening task with the job brief for every position seen for the first time. |
 | **Candidate sourcing** | Pulls recommended candidates for each position and drafts a "greet" outreach action. |
 | **Outreach review** | Every outbound action is drafted first. HR approves or rejects each draft in Boss Connect, or sends all pending drafts at once; a failed send records its reason without blocking the other drafts. |
-| **Inbound message handling** | When a candidate messages you, the app drafts a response: "accept resume" for an attached-resume request, otherwise a reply that also asks for the resume. |
+| **Inbound message handling** | When a candidate messages you, the app auto-accepts attached-resume requests, and for other messages drafts a reply that also asks for the resume. |
 | **Attached resume retrieval** | Attached resumes from contacted candidates are downloaded into the matching task; after three consecutive rounds without a resume, one "request resume" draft is created. |
 | **Screening hand-off** | Tasks with both a job brief and resumes start screening automatically, and S-tier candidates from a completed run enter a phone-confirmation task. |
 | **Deduplication** | Processed positions and candidate states are stored locally, so the same position or candidate never runs through the flow twice. |

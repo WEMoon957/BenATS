@@ -19,7 +19,7 @@ from typing import Literal
 import uvicorn
 from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ValidationError
 
@@ -41,7 +41,20 @@ from .attendance.routes import register_routes as register_attendance_routes
 from .attendance.sync import FeishuSyncEngine
 from .recruitment.db import get_store as get_recruitment_store
 from .recruitment.routes import register_routes as register_recruitment_routes
-from .recruitment.services import score_candidates
+from .recruitment.services import auto_score_candidates
+from .recruitment.plans import (
+    PLAN_STATE_RUNNING,
+    PLAN_STATE_STOPPED,
+    all_checks_pass,
+    check_plan,
+    create_plan,
+    get_plan,
+    list_plans,
+    set_plan_state,
+)
+from .rubric.models import CandidateScore, WeightedRubric
+from .rubric.service import generate_rubric, score_candidate as score_rubric_candidate
+from .rubric.export import build_rubric_workbook
 
 
 MAX_FILE_BYTES = 50 * 1024 * 1024
@@ -294,6 +307,30 @@ class ScoreCandidatesInput(BaseModel):
     candidate_ids: list[int] | None = None
 
 
+class PlanCreateInput(BaseModel):
+    job_keyword: str = Field(min_length=1, max_length=200)
+    mode: str = Field(default="passive", max_length=40)
+
+
+class RubricGenerateInput(BaseModel):
+    jd_text: str = Field(min_length=1)
+
+
+class RubricGenerateByJobInput(BaseModel):
+    job_id: str = ""
+    job_keyword: str = ""
+
+
+class RubricScoreInput(BaseModel):
+    rubric: dict
+    resumes: list[dict] = Field(default_factory=list)
+
+
+class RubricExportInput(BaseModel):
+    rubric: dict
+    results: list[dict] = Field(default_factory=list)
+
+
 def public_job(job: dict) -> dict:
     payload = {
         key: value
@@ -358,7 +395,7 @@ def create_app(data_dir: Path | None = None, app_token: str | None = None) -> Fa
     outreaches = OutreachStore(root)
     automation_store = AutomationStore(root)
     recruitment_store = get_recruitment_store()
-    automation = AutomationEngine(repository, engine, boss, outreaches, automation_store, call_repository, recruitment_store)
+    automation = AutomationEngine(repository, engine, boss, outreaches, automation_store, call_repository, recruitment_store, settings_store)
     token = app_token or secrets.token_urlsafe(32)
     # React 前端构建产物目录（Vite 构建，需先 npm run build）
     static_dir = ROOT / "frontend" / "dist"
@@ -1122,15 +1159,176 @@ def create_app(data_dir: Path | None = None, app_token: str | None = None) -> Fa
         automation.stop()
         return {"running": automation.running}
 
-    # ---- 招聘候选人预评分 ----
+    # ---- 招聘候选人 AI 评分（岗位专属加权评分） ----
 
     @app.post("/api/recruitment/candidates/score")
     async def score_candidates_api(payload: ScoreCandidatesInput):
         def _run():
-            return score_candidates(
-                recruitment_store, boss, repository, settings_store, payload.candidate_ids
+            return auto_score_candidates(
+                recruitment_store, repository, settings_store, boss, payload.candidate_ids
             )
         return await run_in_threadpool(_run)
+
+    # ---- 招聘作业（Plan）：四步向导发起 + 执行前检查 + 启停 ----
+
+    @app.get("/api/recruitment/plans")
+    async def list_plans_api():
+        return {"plans": list_plans(recruitment_store)}
+
+    @app.post("/api/recruitment/plans")
+    async def create_plan_api(payload: PlanCreateInput):
+        def _run():
+            return create_plan(recruitment_store, payload.job_keyword, payload.mode)
+        return await run_in_threadpool(_run)
+
+    @app.get("/api/recruitment/plans/{plan_id}/checks")
+    async def plan_checks(plan_id: int):
+        def _run():
+            plan = get_plan(recruitment_store, plan_id)
+            if plan is None:
+                raise HTTPException(status_code=404, detail="作业不存在")
+            settings = settings_store.load()
+            return {"plan": plan, "checks": check_plan(boss, settings.is_ready, plan)}
+        return await run_in_threadpool(_run)
+
+    @app.post("/api/recruitment/plans/{plan_id}/start")
+    async def start_plan_api(plan_id: int):
+        def _run():
+            plan = get_plan(recruitment_store, plan_id)
+            if plan is None:
+                raise HTTPException(status_code=404, detail="作业不存在")
+            settings = settings_store.load()
+            checks = check_plan(boss, settings.is_ready, plan)
+            if not all_checks_pass(checks):
+                blocked = next((c for c in checks if not c["ok"]), None)
+                detail = f"{blocked['label']} {blocked['detail']}".strip() if blocked else "检查未通过"
+                raise HTTPException(status_code=409, detail=detail)
+            updated = set_plan_state(recruitment_store, plan_id, PLAN_STATE_RUNNING)
+            automation.run_once()
+            return {"plan": updated, "checks": checks}
+        return await run_in_threadpool(_run)
+
+    @app.post("/api/recruitment/plans/{plan_id}/stop")
+    async def stop_plan_api(plan_id: int):
+        def _run():
+            plan = get_plan(recruitment_store, plan_id)
+            if plan is None:
+                raise HTTPException(status_code=404, detail="作业不存在")
+            return {"plan": set_plan_state(recruitment_store, plan_id, PLAN_STATE_STOPPED)}
+        return await run_in_threadpool(_run)
+
+    # ---- 岗位专属加权评分 ----
+
+    @app.post("/api/rubric/generate")
+    async def generate_rubric_api(payload: RubricGenerateInput):
+        settings = settings_store.load()
+        if not settings.is_ready:
+            raise HTTPException(status_code=400, detail="模型配置不完整，请先配置模型 API。")
+
+        def _run():
+            with OpenAICompatibleClient(settings) as client:
+                return generate_rubric(client, payload.jd_text).model_dump()
+
+        return await run_in_threadpool(_run)
+
+    @app.post("/api/rubric/generate-by-job")
+    async def generate_rubric_by_job(payload: RubricGenerateByJobInput):
+        settings = settings_store.load()
+        if not settings.is_ready:
+            raise HTTPException(status_code=400, detail="模型配置不完整，请先配置模型 API。")
+
+        def _run():
+            jd_text = ""
+            if payload.job_id:
+                try:
+                    job = repository.get(payload.job_id)
+                    jd_file = job.get("jd_file") or ""
+                    if jd_file:
+                        path = repository.job_dir(payload.job_id) / "jd" / jd_file
+                        if path.is_file():
+                            jd_text = path.read_text(encoding="utf-8")
+                except FileNotFoundError:
+                    pass
+            if not jd_text and payload.job_keyword:
+                try:
+                    jd_text = boss.fetch_jd(payload.job_keyword)
+                except Exception:  # noqa: BLE001
+                    pass
+            if not jd_text.strip():
+                raise HTTPException(status_code=400, detail="未找到该岗位的 JD，请先在招聘接入中同步职位。")
+            with OpenAICompatibleClient(settings) as client:
+                rubric = generate_rubric(client, jd_text)
+            return {"rubric": rubric.model_dump(), "job_title": rubric.job_title}
+
+        return await run_in_threadpool(_run)
+
+    @app.post("/api/rubric/score")
+    async def score_rubric_api(payload: RubricScoreInput):
+        settings = settings_store.load()
+        if not settings.is_ready:
+            raise HTTPException(status_code=400, detail="模型配置不完整，请先配置模型 API。")
+        rubric = WeightedRubric.model_validate(payload.rubric)
+
+        def _run():
+            results = []
+            with OpenAICompatibleClient(settings) as client:
+                for resume in payload.resumes:
+                    try:
+                        result = score_rubric_candidate(
+                            client, rubric, resume.get("text", ""), resume.get("name", "")
+                        )
+                        results.append(result.model_dump())
+                    except Exception as exc:  # noqa: BLE001
+                        results.append({"candidate_name": resume.get("name"), "error": str(exc)})
+            return results
+
+        return await run_in_threadpool(_run)
+
+    @app.post("/api/rubric/parse")
+    async def parse_rubric_resumes(files: list[UploadFile] = File(...)):
+        settings = settings_store.load()
+
+        def _run(pairs: list[tuple[str, bytes]]):
+            import tempfile
+
+            results = []
+            for name, data in pairs:
+                suffix = Path(name).suffix if name else ""
+                try:
+                    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+                        tmp.write(data)
+                        tmp_path = Path(tmp.name)
+                    try:
+                        from .pipeline import extract_document
+
+                        result = extract_document(tmp_path, settings, resume=True)
+                        text = (result.get("text") or "").strip()
+                    finally:
+                        tmp_path.unlink(missing_ok=True)
+                except Exception as exc:  # noqa: BLE001
+                    text = ""
+                results.append({"name": name or "", "text": text})
+            return results
+
+        pairs = []
+        for f in files:
+            data = await f.read()
+            pairs.append((f.filename or "", data))
+        return await run_in_threadpool(_run, pairs)
+
+    @app.post("/api/rubric/export")
+    async def export_rubric_api(payload: RubricExportInput):
+        from urllib.parse import quote
+
+        rubric = WeightedRubric.model_validate(payload.rubric)
+        results = [CandidateScore.model_validate(r) for r in payload.results]
+        stream = build_rubric_workbook(rubric, results)
+        filename = f"{rubric.job_title}-简历初筛分析表.xlsx"
+        return StreamingResponse(
+            stream,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
+        )
 
     register_attendance_routes(app, attendance_store, feishu_sync)
     register_recruitment_routes(app, recruitment_store)

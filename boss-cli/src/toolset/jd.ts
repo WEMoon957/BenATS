@@ -153,10 +153,10 @@ async function readJobsFromFrame(frame: Frame): Promise<JobReadResult> {
   return (await frame.evaluate(
     `(() => {
       const norm = (v) => (v ?? "").replace(/\\s+/g, " ").trim();
-      const rows = Array.from(document.querySelectorAll(".job-jobInfo-warp"));
+      const rows = Array.from(document.querySelectorAll(".job-item-container"));
       const jobs = rows.map((el) => {
         const statusText = norm(el.querySelector(".job-status-wrapper .status-box")?.textContent);
-        const labelText = norm(el.querySelector(".job-title .label-common")?.textContent);
+        const labelText = norm(el.querySelector(".job-labels .base-label")?.textContent);
         const meta = Array.from(el.querySelectorAll(".job-main-info-wrapper .info-labels span"))
           .map((x) => norm(x.textContent))
           .filter(Boolean);
@@ -164,7 +164,7 @@ async function readJobsFromFrame(frame: Frame): Promise<JobReadResult> {
           .map((x) => norm(x.textContent));
         return {
           id: norm(el.getAttribute("data-id")),
-          title: norm(el.querySelector(".job-title a")?.textContent),
+          title: norm(el.querySelector(".job-name")?.textContent),
           label: labelText,
           status: statusText,
           meta,
@@ -266,14 +266,14 @@ async function clickEditForJob(frame: Frame, job: JobListItem): Promise<void> {
       const jobId = ${targetId};
       const title = ${targetTitle};
       const norm = (v) => (v ?? "").replace(/\\s+/g, " ").trim();
-      const rows = Array.from(document.querySelectorAll(".job-jobInfo-warp"));
+      const rows = Array.from(document.querySelectorAll(".job-item-container"));
       let row = null;
       if (jobId) {
         row = rows.find((el) => norm(el.getAttribute("data-id")) === jobId) ?? null;
       }
       if (!row && title) {
         row = rows.find((el) => {
-          const t = norm(el.querySelector(".job-title a")?.textContent);
+          const t = norm(el.querySelector(".job-name")?.textContent);
           return t === title;
         }) ?? null;
       }

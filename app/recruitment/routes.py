@@ -9,7 +9,10 @@ from .db import (
     STAGES,
     STAGE_GREETED,
     STAGE_GREETING_PENDING,
+    STAGE_INTERVIEWING,
     STAGE_LABELS,
+    STAGE_REJECTED,
+    STAGE_SCREENING,
     RecruitmentStore,
     _now,
 )
@@ -32,6 +35,18 @@ class CandidatePatchInput(BaseModel):
 
 class GreetInput(BaseModel):
     ids: list[int] = Field(min_length=1)
+
+
+class CallQuestionInput(BaseModel):
+    question: str = Field(min_length=1)
+    score: int = Field(ge=1, le=5)
+    note: str = Field(default="", max_length=500)
+
+
+class CallScoreInput(BaseModel):
+    questions: list[CallQuestionInput] = Field(default_factory=list)
+    conclusion: str = Field(default="pass")  # pass / pending / reject
+    note: str = Field(default="", max_length=2000)
 
 
 def candidate_payload(row: dict) -> dict:
@@ -119,3 +134,19 @@ def register_routes(app: FastAPI, store: RecruitmentStore) -> None:
             )
             greeted += 1
         return {"greeted": greeted}
+
+    @app.post("/api/recruitment/candidates/{candidate_id}/call-score")
+    async def save_call_score(candidate_id: int, payload: CallScoreInput):
+        """保存电话沟通评分：按必问问题逐项打分，并据结论推进阶段。"""
+        import json
+
+        row = store.query_one("SELECT * FROM candidate WHERE id = ?", (candidate_id,))
+        if not row:
+            raise HTTPException(status_code=404, detail="候选人不存在")
+        stage = {"pass": STAGE_INTERVIEWING, "reject": STAGE_REJECTED}.get(payload.conclusion, row["stage"])
+        store.execute(
+            "UPDATE candidate SET call_score = ?, stage = ?, updated_at = ? WHERE id = ?",
+            (json.dumps(payload.model_dump(), ensure_ascii=False), stage, _now(), candidate_id),
+        )
+        row = store.query_one("SELECT * FROM candidate WHERE id = ?", (candidate_id,))
+        return candidate_payload(row)
