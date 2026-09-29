@@ -15,6 +15,11 @@ class FakeBoss:
         self.candidates = candidates
         self.resumes = resumes
         self.inbound = inbound or []
+        self.calls = []
+
+    def run(self, *args, **kwargs):
+        self.calls.append(args)
+        return "ok"
 
     def list_positions(self):
         return self.positions
@@ -283,7 +288,7 @@ def test_inbound_creates_reply_draft_for_matched_position_and_dedupes(tmp_path):
     assert store.candidate_status(job["id"], "王五") == "outreached"
 
 
-def test_inbound_resume_request_creates_agree_draft_and_returns_to_download(tmp_path):
+def test_inbound_resume_request_auto_accepts_and_returns_to_download(tmp_path):
     boss = FakeBoss(
         [{"name": "前端工程师", "status": "开放中"}],
         {"前端工程师": "# 前端\n\n## 职位描述\n负责前端。"},
@@ -293,7 +298,7 @@ def test_inbound_resume_request_creates_agree_draft_and_returns_to_download(tmp_
     )
     engine = FakeEngine()
     repository, outreaches, store, automation = build(tmp_path, boss, engine)
-    automation.run_once()
+    summary = automation.run_once()
 
     job = repository.list_jobs(archived=False)[0]
     agrees = [
@@ -303,7 +308,10 @@ def test_inbound_resume_request_creates_agree_draft_and_returns_to_download(tmp_
     assert len(agrees) == 1
     assert agrees[0]["action"]["target"] == "王五"
     assert agrees[0]["action"]["job_keyword"] == "前端工程师"
-    assert store.candidate_status(job["id"], "王五") == "agree_pending"
+    # 同意接收自动执行（非对外触达，无需 HR 审核），直接回到下载探测
+    assert agrees[0]["status"] == "sent"
+    assert summary["resume_requests_accepted"] == 1
+    assert store.candidate_status(job["id"], "王五") == "outreached"
 
     # 去重：下一轮不再重复生成
     automation.run_once()
@@ -312,9 +320,3 @@ def test_inbound_resume_request_creates_agree_draft_and_returns_to_download(tmp_
         if d.get("action", {}).get("command") == "agree-resume"
     ]
     assert len(agrees) == 1
-
-    # 同意发送后回到下载探测（对方发来附件即可自动入库）
-    outreaches.update(agrees[0]["id"], status="sent", result="ok", error="")
-    summary = automation.run_once()
-    assert summary["outreaches_reconciled"] == 1
-    assert store.candidate_status(job["id"], "王五") == "outreached"

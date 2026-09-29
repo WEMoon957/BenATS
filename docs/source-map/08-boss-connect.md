@@ -17,12 +17,14 @@ boss-cli（独立部署，子进程调用）
         ▼
 AutomationEngine.run_once()（默认每 300 秒一轮，daemon 线程）
   1. sync_positions()          新职位 → JobRepository.create() + 写入 JD
-  2. sync_candidates()         新候选人 → OutreachStore.create(greet) 草稿
-  3. sync_inbound()            未读消息 → agree-resume 或 send+求简历 草稿
-  4. sync_outreach_results()   已发送触达 → 回写候选人状态为 outreached
-  5. sync_resumes()            已触达候选人 → 下载附件简历写入任务
-  6. start_ready_jobs()        draft/waiting 且材料齐备的任务 → EvaluationEngine.start()
-  7. sync_s_calls()            已完成的筛选任务 → S 级名单电话确认任务
+  2. sync_candidates()         新候选人 → 写入候选人库 + OutreachStore.create(greet) 草稿
+  3. sync_inbound()            未读消息 → 生成「同意接收」或「回复+求简历」草稿
+  4. auto_accept_resumes()     自动执行「同意接收」草稿（非对外触达，无需 HR 审核）
+  5. sync_outreach_results()   已发送触达 → 回写候选人状态为 outreached
+  6. sync_resumes()            已触达候选人 → 下载附件简历写入任务
+  7. sync_scoring()            已收简历候选人 → 岗位专属标准自动评分
+  8. start_ready_jobs()        draft/waiting 且材料齐备的任务 → EvaluationEngine.start()
+  9. sync_s_calls()            已完成的筛选任务 → S 级名单电话确认任务
         │
         ▼
 OutreachStore（outreaches/<id>/outreach.json，pending → sent / failed / rejected）
@@ -52,7 +54,7 @@ OutreachStore（outreaches/<id>/outreach.json，pending → sent / failed / reje
 
 ```text
 outreach_pending → outreached    打招呼/回复草稿发送成功
-agree_pending    → outreached    同意接收附件简历草稿发送成功
+agree_pending    → outreached    同意接收附件简历自动执行成功（无需 HR 审核）
 inbound_pending  → outreached    回复并索要简历草稿发送成功
 resume_requested → outreached    求简历草稿发送成功，回到下载探测
 outreached       → resume_downloaded   附件简历下载并写入任务成功

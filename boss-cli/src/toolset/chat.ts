@@ -514,7 +514,8 @@ export async function runOpenCandidateChatByIndex(
     if (!wrap) return { total, name: "", job: "", message: "", time: "", x: 0, y: 0 };
     const row = wrap.querySelector(".geek-item") || wrap;
     row.scrollIntoView({ behavior: "instant", block: "center", inline: "nearest" });
-    const rect = row.getBoundingClientRect();
+    const nameEl = wrap.querySelector(".geek-name") || row;
+    const rect = nameEl.getBoundingClientRect();
     return {
       total,
       name: norm(wrap.querySelector(".geek-name")?.textContent),
@@ -626,7 +627,8 @@ export async function runOpenCandidateChat(
 
     const clickNameLiteral = JSON.stringify(foundName || targetName);
     const clickExactLiteral = JSON.stringify(exact);
-    const scrolledToTarget = (await page.evaluate(`(() => {
+    // 用 DOM click 点击候选行（page.mouse.click 坐标在高 DPI 下会漂移）。
+    const clicked = (await page.evaluate(`(() => {
       const targetName = ${clickNameLiteral};
       const exactMatch = ${clickExactLiteral};
       const norm = (v) => (v ?? "").replace(/\\s+/g, " ").trim();
@@ -635,52 +637,13 @@ export async function runOpenCandidateChat(
       const wrap = wraps.find((el) => matches(norm(el.querySelector(".geek-name")?.textContent)));
       if (!wrap) return false;
       const row = wrap.querySelector(".geek-item") || wrap;
-      let node = row.parentElement;
-      let scroller = null;
-      while (node) {
-        const style = window.getComputedStyle(node);
-        const overflowY = style.overflowY;
-        const canScroll =
-          (overflowY === "auto" || overflowY === "scroll") &&
-          node.scrollHeight > node.clientHeight;
-        if (canScroll) {
-          scroller = node;
-          break;
-        }
-        node = node.parentElement;
-      }
-      if (scroller) {
-        const rowRect = row.getBoundingClientRect();
-        const scrollerRect = scroller.getBoundingClientRect();
-        scroller.scrollTop += rowRect.top - scrollerRect.top - (scroller.clientHeight - rowRect.height) / 2;
-      } else {
-        row.scrollIntoView({ behavior: "instant", block: "center", inline: "nearest" });
-      }
+      row.scrollIntoView({ behavior: "instant", block: "center", inline: "nearest" });
+      row.click();
       return true;
     })()`)) as boolean;
-    if (!scrolledToTarget) {
+    if (!clicked) {
       throw new Error(`未能重新定位候选人行：${foundName || targetName}`);
     }
-    await sleepRandom(120, 220);
-    const clickPoint = (await page.evaluate(`(() => {
-      const targetName = ${clickNameLiteral};
-      const exactMatch = ${clickExactLiteral};
-      const norm = (v) => (v ?? "").replace(/\\s+/g, " ").trim();
-      const matches = (value) => exactMatch ? value === targetName : value.includes(targetName);
-      const wraps = Array.from(document.querySelectorAll(".geek-item-wrap"));
-      const wrap = wraps.find((el) => matches(norm(el.querySelector(".geek-name")?.textContent)));
-      if (!wrap) return null;
-      const row = wrap.querySelector(".geek-item") || wrap;
-      const rect = row.getBoundingClientRect();
-      return {
-        x: rect.left + rect.width / 2,
-        y: rect.top + rect.height / 2,
-      };
-    })()`)) as { x: number; y: number } | null;
-    if (!clickPoint) {
-      throw new Error(`未能重新定位候选人行：${foundName || targetName}`);
-    }
-    await page.mouse.click(clickPoint.x, clickPoint.y, { delay: 40 });
 
     await sleepRandom(OPEN_CHAT_AFTER_ROW_CLICK_MS.min, OPEN_CHAT_AFTER_ROW_CLICK_MS.max);
 

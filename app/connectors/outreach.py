@@ -50,6 +50,21 @@ class OutreachStore(JsonStore):
             "archived_at": None,
         }
 
+    def create_unique(self, *, action: OutreachAction) -> dict | None:
+        """创建去重草稿：相同候选人 + 动作类型 + 命令的待审核草稿已存在时返回 None，否则创建并返回新记录。"""
+        with self._lock:
+            for record in self.list_records(archived=False):
+                if record.get("status") != "pending":
+                    continue
+                existing = record.get("action", {})
+                if (
+                    existing.get("target") == action.target
+                    and existing.get("kind") == action.kind
+                    and existing.get("command", "") == action.command
+                ):
+                    return None
+            return self.create(action=action)
+
 
 def execute_outreach(connector: BossCliConnector, action: OutreachAction) -> str:
     """把一条触达动作翻译成 boss 命令并执行，返回执行结果文本。"""

@@ -2,6 +2,23 @@ import type { ElementHandle, Frame, Page } from 'puppeteer-core';
 import { sleepRandom } from '../browser/timing.js';
 import { resumeHeight, setTempHeight } from '../browser/viewport_temp.js';
 
+/** 给某个 Promise 加超时，超时后以明确错误失败（不取消底层操作，仅让调用方尽快暴露失败）。 */
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
 /** 在线简历 iframe：`src` 常为相对路径 `/web/frame/c-resume/...`，故用子串匹配 */
 export const C_RESUME_IFRAME_SELECTOR =
   'iframe[src*="c-resume"], iframe[src*="frame/c-resume"]' as const;
@@ -47,6 +64,9 @@ const CLOSE_C_RESUME_PANEL_SCRIPT = `(() => {
 })()`;
 
 const C_RESUME_CLOSE_AFTER_CAPTURE_DELAY_MS = 3_000;
+
+/** 在线简历 iframe 截图超时上限：截图若在此时间内未完成则直接失败，避免命令永久挂起并占用会话锁。 */
+const C_RESUME_SCREENSHOT_TIMEOUT_MS = 30_000;
 
 const VISIBLE_C_RESUME_IN_FRAME_SCRIPT = `(() => {
   var iframe = document.querySelector(${JSON.stringify(C_RESUME_IFRAME_SELECTOR)});
@@ -171,22 +191,25 @@ export async function captureCResumeIframeToFile(
       return false;
     }
 
-    await iframe.evaluate(`(() => {
-      document.documentElement.scrollIntoView({ block: "start", inline: "nearest" });
-    })()`);
-
-    const box = await iframe.boundingBox();
-    if (!box) {
-      await iframe.dispose();
-      return false;
-    }
-
     try {
-      await iframe.screenshot({
-        path: absPath,
-        type: 'png',
-        captureBeyondViewport: true,
-      });
+      await iframe.evaluate(`(() => {
+        document.documentElement.scrollIntoView({ block: "start", inline: "nearest" });
+      })()`);
+
+      const box = await iframe.boundingBox();
+      if (!box) {
+        return false;
+      }
+
+      await withTimeout(
+        iframe.screenshot({
+          path: absPath,
+          type: 'png',
+          captureBeyondViewport: true,
+        }),
+        C_RESUME_SCREENSHOT_TIMEOUT_MS,
+        `在线简历 iframe 截图超时（${C_RESUME_SCREENSHOT_TIMEOUT_MS / 1000}s）。`,
+      );
     } finally {
       await iframe.dispose();
     }
@@ -195,9 +218,9 @@ export async function captureCResumeIframeToFile(
       C_RESUME_CLOSE_AFTER_CAPTURE_DELAY_MS,
       C_RESUME_CLOSE_AFTER_CAPTURE_DELAY_MS,
     );
-    await closeCResumePanel(page);
     return true;
   } finally {
+    await closeCResumePanel(page);
     await resumeHeight(page, preOpenViewport);
   }
 }

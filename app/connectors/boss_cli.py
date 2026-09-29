@@ -125,6 +125,18 @@ class BossCliConnector:
             raise BossCliError(f"附件简历文件不存在：{path}")
         return path
 
+    def greet(self, candidate_name: str, job_keyword: str | None = None) -> str:
+        """打招呼：在推荐/深度搜索页对候选人点击「打招呼」（`boss greet`）。"""
+        args = ["greet", candidate_name]
+        if job_keyword:
+            args += ["--job", job_keyword]
+        return self.run(*args)
+
+    def request_resume(self, candidate_name: str) -> str:
+        """要简历：打开候选人会话并点击「求简历」（`boss chat` + `action request-attachment-resume`）。"""
+        self.run("chat", candidate_name)
+        return self.run("action", "request-attachment-resume")
+
     def preview_resume(self, candidate_name: str) -> str:
         """预览在线简历并返回 OCR 正文文本（`boss preview`）。
 
