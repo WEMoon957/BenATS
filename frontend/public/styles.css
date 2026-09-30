@@ -802,6 +802,12 @@ html:has(.preview-backdrop) {
 .boss-panel { margin-bottom: 20px; padding: 18px 20px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); box-shadow: 0 4px 14px rgba(0, 0, 0, .04); }
 .boss-lead { margin: 4px 0 14px; color: var(--muted); font-size: 11px; line-height: 1.6; }
 .boss-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.boss-target-job { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+.boss-target-job label { color: var(--ink-soft); font-size: 11px; }
+.boss-target-job select { min-width: 180px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--paper); color: var(--ink); font-size: 11px; }
+.boss-target-job select:focus { outline: none; border-color: var(--focus-ring); }
+.boss-target-job select:disabled { background: var(--surface-muted); color: var(--muted); }
+.boss-hint { color: var(--muted); font-size: 10px; }
 .boss-engine-state { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-soft); font-size: 11px; }
 .boss-empty { margin: 0; padding: 10px 0; color: var(--muted); font-size: 11px; }
 .boss-outreach-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
@@ -926,6 +932,7 @@ html:has(.preview-backdrop) {
 .rec-card.is-a { border-left-color: #1e7a35; }
 .rec-card.is-b { border-left-color: #a15c05; }
 .rec-card.is-c { border-left-color: #aa3a30; }
+.rec-card.is-d { border-left-color: #8a8f98; }
 .rec-card-head { display: flex; align-items: center; gap: 6px; }
 .rec-card-head strong { font-size: 12px; }
 .rec-card-head input[type="checkbox"] { margin: 0; }
@@ -934,6 +941,7 @@ html:has(.preview-backdrop) {
 .rec-card.is-a .rec-score { background: #1e7a35; }
 .rec-card.is-b .rec-score { background: #a15c05; }
 .rec-card.is-c .rec-score { background: #aa3a30; }
+.rec-card.is-d .rec-score { background: #8a8f98; }
 .rec-card-meta { margin-top: 3px; color: var(--muted); font-size: 10px; }
 .rec-card-reason { margin: 6px 0 0; color: var(--ink-soft); font-size: 10px; line-height: 1.5; }
 .rec-card-actions { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
@@ -948,6 +956,30 @@ html:has(.preview-backdrop) {
 .rec-detail-line { margin: 4px 0; }
 .rec-detail-questions ol { margin: 4px 0 0 18px; padding: 0; }
 .rec-detail-questions li { margin: 2px 0; }
+.rec-detail-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 6px; font-size: 10px; }
+.rec-detail-action, .rec-detail-priority { padding: 1px 6px; border-radius: 99px; background: var(--surface-muted); color: var(--ink-soft); }
+.rec-detail-score { color: var(--ink-soft); }
+.rec-detail-flags { margin: 4px 0; padding: 4px 8px; border-radius: 5px; font-size: 10px; line-height: 1.5; }
+.rec-detail-flags.is-veto { background: var(--red-soft); color: var(--red); }
+.rec-detail-flags.is-warning { background: #fff7e6; color: #7a4d00; }
+.rec-detail-rubric { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--line); }
+.rec-rubric-lead { margin-bottom: 5px; color: var(--muted); font-size: 10px; }
+.rec-rubric-group { margin-bottom: 6px; }
+.rec-rubric-group-head { margin-bottom: 3px; color: var(--ink-soft); font-size: 10px; font-weight: 600; }
+.rec-rubric-items { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; }
+.rec-rubric-item { padding: 4px 6px; border-left: 2px solid var(--line-strong); border-radius: 3px; background: var(--paper); }
+.rec-rubric-item.is-5 { border-left-color: #315fae; }
+.rec-rubric-item.is-3 { border-left-color: #a15c05; }
+.rec-rubric-item.is-1 { border-left-color: #aa3a30; }
+.rec-rubric-item-head { display: flex; align-items: baseline; gap: 5px; font-size: 10px; }
+.rec-rubric-item-key { flex: 0 0 auto; color: var(--muted); }
+.rec-rubric-item-name { flex: 1 1 auto; min-width: 0; }
+.rec-rubric-item-weight { flex: 0 0 auto; color: var(--muted); }
+.rec-rubric-item-score { flex: 0 0 auto; font-weight: 600; }
+.rec-rubric-item.is-5 .rec-rubric-item-score { color: #315fae; }
+.rec-rubric-item.is-3 .rec-rubric-item-score { color: #a15c05; }
+.rec-rubric-item.is-1 .rec-rubric-item-score { color: #aa3a30; }
+.rec-rubric-item-evidence { margin: 2px 0 0; color: var(--ink-soft); font-size: 10px; line-height: 1.45; }
 
 /* ---- 岗位专属加权评分 ---- */
 

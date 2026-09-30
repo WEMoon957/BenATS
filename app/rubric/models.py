@@ -8,6 +8,9 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+# 评分项 id 只在组内唯一，跨组引用时统一加组字母前缀（A、B、C…）保证全局唯一
+GROUP_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
 
 class ScoreItem(BaseModel):
     """单个评分项，如「① 餐饮行业垂直深度 18 分」。"""
@@ -60,10 +63,18 @@ class WeightedRubric(BaseModel):
     grade_thresholds: dict[str, int] = Field(default_factory=lambda: {"S": 85, "A": 75, "B": 60})
 
     def all_items(self) -> list[tuple[str, ScoreItem]]:
-        return [(item.id, item) for group in self.groups for item in group.items]
+        """返回 (全局唯一 key, 评分项)。
+
+        评分项 id 只在组内唯一，跨组会重复，因此全局引用统一加上组字母（A①、B③…）。
+        """
+        items: list[tuple[str, ScoreItem]] = []
+        for index, group in enumerate(self.groups):
+            letter = GROUP_LETTERS[index] if index < len(GROUP_LETTERS) else str(index + 1)
+            items.extend((f"{letter}{item.id}", item) for item in group.items)
+        return items
 
     def item_map(self) -> dict[str, ScoreItem]:
-        return {item.id: item for group in self.groups for item in group.items}
+        return dict(self.all_items())
 
 
 class ItemScore(BaseModel):
@@ -96,13 +107,21 @@ class CandidateScore(BaseModel):
 
 
 def compute_score(candidate: CandidateScore, rubric: WeightedRubric) -> CandidateScore:
-    """按权重计算基础分与总分，判定等级与建议动作。"""
+    """按权重计算基础分与总分，判定等级与建议动作。
+
+    逐项得分必须能对应到评分标准：对不上或整体缺失时直接报错，
+    避免把「对不上」当成 0 分，从而把候选人误判为淘汰。
+    """
+    if not candidate.item_scores:
+        raise ValueError("评分结果缺少逐项得分")
     item_map = rubric.item_map()
+    unknown = [item_score.item_id for item_score in candidate.item_scores if item_score.item_id not in item_map]
+    if unknown:
+        raise ValueError(f"逐项得分无法对应评分标准：{'、'.join(unknown)}")
+
     base = 0.0
     for item_score in candidate.item_scores:
-        item = item_map.get(item_score.item_id)
-        if item is None:
-            continue
+        item = item_map[item_score.item_id]
         base += item.weight * item_score.score / 5.0
     candidate.base_score = round(base, 1)
     candidate.total = round(base + candidate.bonus, 1)

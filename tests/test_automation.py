@@ -2,9 +2,14 @@
 
 import json
 
+import pytest
+
+from app.config import AppSettings, SettingsStore
 from app.connectors.automation import AutomationEngine, AutomationStore
 from app.connectors.boss_cli import BossCliError
 from app.connectors.outreach import OutreachStore
+from app.recruitment import services
+from app.recruitment.db import RecruitmentStore
 from app.repository import JobRepository
 
 
@@ -57,11 +62,17 @@ class FakeCallRepository:
         return {"id": "call-id"}
 
 
-def build(tmp_path, boss, engine, call_repository=None):
+def build(tmp_path, boss, engine, call_repository=None, target_job=""):
     repository = JobRepository(tmp_path)
     outreaches = OutreachStore(tmp_path)
     store = AutomationStore(tmp_path)
-    automation = AutomationEngine(repository, engine, boss, outreaches, store, call_repository)
+    settings_store = None
+    if target_job:
+        settings_store = SettingsStore(tmp_path)
+        settings_store.save(AppSettings(boss_target_job=target_job))
+    automation = AutomationEngine(
+        repository, engine, boss, outreaches, store, call_repository, None, settings_store
+    )
     return repository, outreaches, store, automation
 
 
@@ -237,13 +248,74 @@ def test_approve_all_sends_every_pending_outreach(tmp_path, monkeypatch):
         assert response.status_code == 200
 
     response = client.post("/api/boss/outreaches/approve-all", headers=headers)
-    assert response.json() == {"sent": 2, "failed": 0}
+    assert response.json() == {"sent": 2, "failed": 0, "skipped": 0, "target_job": ""}
     assert len(fake.calls) == 2
 
     # 全部已发送后重复调用不重复执行
     response = client.post("/api/boss/outreaches/approve-all", headers=headers)
-    assert response.json() == {"sent": 0, "failed": 0}
+    assert response.json() == {"sent": 0, "failed": 0, "skipped": 0, "target_job": ""}
     assert len(fake.calls) == 2
+
+
+def test_approve_all_scoped_to_target_job(tmp_path, monkeypatch):
+    """一键发送只发送当前目标岗位的草稿，其它岗位的历史草稿一律跳过。"""
+    from fastapi.testclient import TestClient
+
+    from app.main import create_app
+
+    class FakeConnector:
+        def __init__(self):
+            self.calls = []
+
+        def run(self, *args, **kwargs):
+            self.calls.append(args)
+            return "ok"
+
+    fake = FakeConnector()
+    monkeypatch.setattr("app.main.BossCliConnector", lambda: fake)
+    app = create_app(data_dir=tmp_path)
+    client = TestClient(app)
+    headers = {"X-App-Token": app.state.app_token}
+
+    client.post("/api/boss/target-job", json={"job": "招聘专员"}, headers=headers)
+    for job in ("招聘专员", "新媒体运营总监"):
+        response = client.post(
+            "/api/boss/outreaches",
+            json={"kind": "greet", "target": f"{job}候选人", "job_keyword": job},
+            headers=headers,
+        )
+        assert response.status_code == 200
+
+    response = client.post("/api/boss/outreaches/approve-all", headers=headers)
+    assert response.json() == {"sent": 1, "failed": 0, "skipped": 1, "target_job": "招聘专员"}
+
+
+def test_run_once_skips_when_another_round_is_running(tmp_path):
+    """同一时刻只允许一轮：已有轮次在执行时并发调用直接跳过，避免两轮同时驱动浏览器。"""
+    boss = FakeBoss([], {}, {}, {})
+    _, _, _, automation = build(tmp_path, boss, FakeEngine())
+
+    assert automation._round_lock.acquire(blocking=False)
+    try:
+        assert automation.run_once() == {"skipped": "busy"}
+    finally:
+        automation._round_lock.release()
+
+
+def test_stop_interrupts_resume_download_loop(tmp_path):
+    """收到停止请求后，轮内不再继续逐个候选人下载简历。"""
+    boss = FakeBoss([], {}, {}, {})
+    _, _, store, automation = build(tmp_path, boss, FakeEngine())
+    store.mark_position("招聘专员", "job-1")
+    for name in ("甲", "乙", "丙"):
+        store.mark_candidate("job-1", name, "outreached")
+
+    attempted: list[str] = []
+    automation._download_resume_to_job = lambda name, job_id: attempted.append(name) or None
+
+    automation.stop()
+    automation.sync_resumes()
+    assert attempted == []
 
 
 def test_inbound_creates_reply_draft_for_matched_position_and_dedupes(tmp_path):
@@ -320,3 +392,257 @@ def test_inbound_resume_request_auto_accepts_and_returns_to_download(tmp_path):
         if d.get("action", {}).get("command") == "agree-resume"
     ]
     assert len(agrees) == 1
+
+
+def test_inbound_resume_file_downloads_without_requesting_resume(tmp_path):
+    """对方已发来附件简历时不再求简历，直接下载并把候选人推进到已收简历。"""
+    resume = tmp_path / "王五.pdf"
+    resume.write_bytes(b"%PDF-1.4 fake")
+    boss = FakeBoss(
+        [{"name": "前端工程师", "status": "开放中"}],
+        {"前端工程师": "# 前端\n\n## 职位描述\n负责前端。"},
+        {},
+        {"王五": resume},
+        inbound=[{"name": "王五", "job": "前端工程师", "message": "王五简历.pdf"}],
+    )
+    engine = FakeEngine()
+    repository, outreaches, store, automation = build(tmp_path, boss, engine)
+    summary = automation.run_once()
+
+    job = repository.list_jobs(archived=False)[0]
+    sends = [
+        d for d in outreaches.list_records(archived=False)
+        if d.get("action", {}).get("kind") == "send"
+    ]
+    assert sends == []
+    assert summary["resumes_downloaded"] == 1
+    assert store.candidate_status(job["id"], "王五") == "resume_downloaded"
+
+
+def test_inbound_scoped_to_configured_target_job(tmp_path):
+    """配置目标岗位后，其他岗位的往来消息不进入流程。"""
+    boss = FakeBoss(
+        [{"name": "前端工程师", "status": "开放中"}, {"name": "设计师", "status": "开放中"}],
+        {"前端工程师": "# 前端", "设计师": "# 设计"},
+        {},
+        {},
+        inbound=[
+            {"name": "王五", "job": "前端工程师"},
+            {"name": "赵六", "job": "设计师"},
+        ],
+    )
+    engine = FakeEngine()
+    repository, outreaches, store, automation = build(
+        tmp_path, boss, engine, target_job="前端工程师"
+    )
+    automation.run_once()
+
+    assert len(repository.list_jobs(archived=False)) == 1
+    targets = [d["action"]["target"] for d in outreaches.list_records(archived=False)]
+    assert targets == ["王五"]
+
+
+def test_inbound_resume_file_supersedes_pending_resume_request(tmp_path):
+    """对方随后发来附件简历时，作废此前待审核的求简历草稿。"""
+    resume = tmp_path / "王五.pdf"
+    resume.write_bytes(b"%PDF-1.4 fake")
+    boss = FakeBoss(
+        [{"name": "前端工程师", "status": "开放中"}],
+        {"前端工程师": "# 前端"},
+        {},
+        {"王五": resume},
+        inbound=[{"name": "王五", "job": "前端工程师", "message": "你好"}],
+    )
+    engine = FakeEngine()
+    repository, outreaches, store, automation = build(tmp_path, boss, engine)
+    automation.run_once()
+    assert [d["status"] for d in outreaches.list_records(archived=False)] == ["pending"]
+
+    boss.inbound[0]["message"] = "王五简历.pdf"
+    summary = automation.run_once()
+
+    job = repository.list_jobs(archived=False)[0]
+    assert [d["status"] for d in outreaches.list_records(archived=False)] == ["rejected"]
+    assert summary["resumes_downloaded"] == 1
+    assert store.candidate_status(job["id"], "王五") == "resume_downloaded"
+
+
+def test_downloaded_resume_is_recorded_on_candidate(tmp_path):
+    """下载成功后把本人简历文件名登记到候选人库，供自动打分读取。"""
+    resume = tmp_path / "王五.pdf"
+    resume.write_bytes(b"%PDF-1.4 fake")
+    boss = FakeBoss(
+        [{"name": "前端工程师", "status": "开放中"}],
+        {"前端工程师": "# 前端"},
+        {},
+        {"王五": resume},
+        inbound=[{"name": "王五", "job": "前端工程师", "message": "王五简历.pdf"}],
+    )
+    repository = JobRepository(tmp_path)
+    recruitment = RecruitmentStore(tmp_path / "recruitment.db")
+    recruitment.initialize()
+    automation = AutomationEngine(
+        repository, FakeEngine(), boss, OutreachStore(tmp_path), AutomationStore(tmp_path),
+        None, recruitment, None,
+    )
+    automation.run_once()
+
+    job = repository.list_jobs(archived=False)[0]
+    row = recruitment.query_one(
+        "SELECT stage, resume_file FROM candidate WHERE name = ? AND job_keyword = ?",
+        ("王五", "前端工程师"),
+    )
+    assert row["stage"] == "resume_received"
+    assert row["resume_file"] in (job["resume_files"] or [])
+
+
+def test_get_resume_text_reads_candidate_own_resume(tmp_path, monkeypatch):
+    """同一任务下多位候选人各读本人的简历，而不是任务里最后一份。"""
+    repository = JobRepository(tmp_path)
+    job = repository.create(title="新媒体运营总监")
+    stored_names = []
+    for label in ("甲", "乙"):
+        stored, target = repository.reserve_upload(job["id"], "resumes", f"{label}.pdf")
+        target.write_bytes(b"%PDF-1.4")
+        stored_names.append(stored)
+    repository.update(job["id"], resume_files=stored_names)
+
+    monkeypatch.setattr(
+        services, "extract_document",
+        lambda path, settings, resume=True: {"text": path.stem},
+    )
+
+    def read(name: str, resume_file: str) -> str:
+        return services._get_resume_text(
+            {"name": name, "job_id": job["id"], "resume_file": resume_file}, repository, None
+        )
+
+    assert read("甲", stored_names[0]) == "甲"
+    assert read("乙", stored_names[1]) == "乙"
+
+
+def test_get_resume_text_rejects_candidate_without_resume(tmp_path):
+    """尚未登记本人简历文件时不打分，避免用空文本或别人的简历得出评分。"""
+    repository = JobRepository(tmp_path)
+    job = repository.create(title="新媒体运营总监")
+    with pytest.raises(FileNotFoundError):
+        services._get_resume_text(
+            {"name": "甲", "job_id": job["id"], "resume_file": ""}, repository, None
+        )
+
+
+def test_target_job_survives_settings_save(tmp_path):
+    """目标岗位在「招聘接入」面板单独设置，保存其他设置时不应被清空。"""
+    from fastapi.testclient import TestClient
+
+    from app.main import create_app
+
+    app = create_app(data_dir=tmp_path)
+    client = TestClient(app)
+    headers = {"X-App-Token": app.state.app_token}
+
+    response = client.post("/api/boss/target-job", json={"job": "新媒体运营总监"}, headers=headers)
+    assert response.json() == {"target_job": "新媒体运营总监"}
+
+    # 设置弹窗保存时不携带 boss_target_job，应保持原值
+    response = client.put(
+        "/api/settings",
+        json={"base_url": "https://api.deepseek.com", "model": "deepseek-flash"},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    assert response.json()["boss_target_job"] == "新媒体运营总监"
+
+    response = client.post("/api/boss/target-job", json={"job": ""}, headers=headers)
+    assert response.json() == {"target_job": ""}
+
+
+def test_target_job_selector_payload(tmp_path):
+    """目标岗位选择器读本地缓存即返回岗位列表，不调 boss-cli，且不与 /api/boss/positions 撞路由。
+
+    背景：`GET /api/boss/positions` 曾被注册两次，先注册的实时职位接口遮蔽了选择器接口，
+    导致前端拿不到 positions、下拉框被 disabled。
+    """
+    from fastapi.testclient import TestClient
+
+    from app.main import create_app
+
+    app = create_app(data_dir=tmp_path)
+    app.state.automation.store.remember_available(["招聘专员", "新媒体运营总监"])
+    client = TestClient(app)
+    headers = {"X-App-Token": app.state.app_token}
+
+    response = client.get("/api/boss/target-job", headers=headers)
+    assert response.status_code == 200
+    assert response.json() == {
+        "target_job": "",
+        "positions": ["招聘专员", "新媒体运营总监"],
+    }
+    # 两个端点必须各自独立存在：实时职位表与选择器数据不可合并为同一路径
+    paths = {route.path for route in app.routes}
+    assert {"/api/boss/positions", "/api/boss/target-job"} <= paths
+
+
+def test_score_reason_matches_grade():
+    """一句话结论与档位一致：命中否决项列否决项，D 档给风险，通过档给亮点。"""
+    from app.rubric.models import CandidateScore
+
+    def score(grade: str, **kwargs) -> CandidateScore:
+        return CandidateScore(candidate_name="甲", item_scores=[], grade=grade, **kwargs)
+
+    veto = score("D", veto_hits=["赛道不符", "经验不足"], risk="风险A", highlight="亮点A")
+    assert services._score_reason(veto) == "命中否决项：赛道不符、经验不足"
+
+    low = score("D", risk="风险B", highlight="亮点B")
+    assert services._score_reason(low) == "风险B"
+
+    passed = score("A", risk="风险C", highlight="亮点C")
+    assert services._score_reason(passed) == "亮点C"
+
+
+def _two_group_rubric():
+    from app.rubric.models import WeightedRubric
+
+    return WeightedRubric.model_validate({
+        "job_title": "岗位",
+        "groups": [
+            {"name": "A 组", "items": [{"id": "①", "name": "aa", "weight": 60, "rubric": "5分…"}]},
+            {"name": "B 组", "items": [{"id": "①", "name": "bb", "weight": 40, "rubric": "5分…"}]},
+        ],
+    })
+
+
+def test_rubric_item_keys_are_globally_unique():
+    """评分项 id 只在组内唯一，全局 key 必须带组字母，否则跨组撞键。"""
+    assert list(_two_group_rubric().item_map().keys()) == ["A①", "B①"]
+
+
+def test_compute_score_matches_model_item_ids():
+    """模型按「组字母 + 项 id」返回时必须能对上，并按权重算出总分。"""
+    from app.rubric.models import CandidateScore, compute_score
+
+    result = compute_score(
+        CandidateScore(candidate_name="甲", item_scores=[
+            {"item_id": "A①", "score": 5, "evidence": "依据一"},
+            {"item_id": "B①", "score": 3, "evidence": "依据二"},
+        ]),
+        _two_group_rubric(),
+    )
+    # 60×5/5 + 40×3/5 = 84
+    assert result.base_score == 84.0
+    assert result.total == 84.0
+    assert result.grade == "A"
+
+
+def test_compute_score_rejects_unmatched_item_ids():
+    """逐项得分对不上评分标准时报错，不能当成 0 分把候选人误判为淘汰。"""
+    from app.rubric.models import CandidateScore, compute_score
+
+    rubric = _two_group_rubric()
+    with pytest.raises(ValueError, match="无法对应评分标准"):
+        compute_score(
+            CandidateScore(candidate_name="甲", item_scores=[{"item_id": "Z9", "score": 5}]),
+            rubric,
+        )
+    with pytest.raises(ValueError, match="缺少逐项得分"):
+        compute_score(CandidateScore(candidate_name="甲", item_scores=[]), rubric)

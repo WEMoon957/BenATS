@@ -35,7 +35,7 @@ from .runtime.phone_screening import CallProcessor, render_call_summary_markdown
 from .connectors.boss_cli import BossCliConnector, BossCliError
 from .connectors.imports import import_position
 from .connectors.outreach import OutreachAction, OutreachStore, execute_outreach
-from .connectors.automation import AutomationEngine, AutomationStore
+from .connectors.automation import AutomationEngine, AutomationStore, _is_target_job
 from .attendance.db import get_store as get_attendance_store
 from .attendance.routes import register_routes as register_attendance_routes
 from .attendance.sync import FeishuSyncEngine
@@ -263,6 +263,8 @@ class SettingsInput(BaseModel):
     feishu_webhook_url: str = ""
     feishu_sign_secret: str = ""
     clear_feishu_sign: bool = False
+    # 空缺省保持原值：目标岗位在「招聘接入」面板单独设置，设置弹窗不携带该字段
+    boss_target_job: str | None = None
 
 
 class JobInput(BaseModel):
@@ -291,6 +293,10 @@ class CallItemInput(BaseModel):
 class BossImportInput(BaseModel):
     position_name: str = Field(min_length=1, max_length=200)
     job_keyword: str = Field(default="", max_length=200)
+
+
+class BossTargetJobInput(BaseModel):
+    job: str = Field(default="", max_length=200)
 
 
 class OutreachInput(BaseModel):
@@ -492,15 +498,19 @@ def create_app(data_dir: Path | None = None, app_token: str | None = None) -> Fa
         feishu_sign = "" if payload.clear_feishu_sign else (
             payload.feishu_sign_secret.strip() or current.feishu_sign_secret
         )
+        target_job = (
+            current.boss_target_job if payload.boss_target_job is None else payload.boss_target_job.strip()
+        )
         return AppSettings(
             **payload.model_dump(exclude={
                 "api_key", "asr_api_key", "asr_enabled", "clear_asr",
-                "feishu_sign_secret", "clear_feishu_sign",
+                "feishu_sign_secret", "clear_feishu_sign", "boss_target_job",
             }),
             api_key=api_key,
             asr_api_key=asr_key,
             asr_enabled=bool(asr_key),
             feishu_sign_secret=feishu_sign,
+            boss_target_job=target_job,
         )
 
     @app.put("/api/settings")
@@ -1120,15 +1130,24 @@ def create_app(data_dir: Path | None = None, app_token: str | None = None) -> Fa
 
     @app.post("/api/boss/outreaches/approve-all")
     async def approve_all_outreaches():
-        """一键发送：按列表顺序逐条执行全部待审核触达，返回发送与失败计数。"""
+        """一键发送：只发送当前目标岗位的待审核触达，返回发送/失败/跳过计数。
+
+        限定目标岗位有两个原因：一是避免点到「一键发送」时把其它岗位的历史草稿一并发出，
+        二是历史草稿可能上百条、每条要几十秒，整批会长时间跑不完。
+        """
 
         def _run():
+            target = automation.target_job()
             sent = 0
             failed = 0
+            skipped = 0
             for record in outreaches.list_records(archived=False):
                 if record.get("status") != "pending":
                     continue
                 action = OutreachAction(**record["action"])
+                if not _is_target_job(action.job_keyword, target):
+                    skipped += 1
+                    continue
                 try:
                     result = execute_outreach(boss, action)
                 except BossCliError as exc:
@@ -1137,13 +1156,28 @@ def create_app(data_dir: Path | None = None, app_token: str | None = None) -> Fa
                     continue
                 outreaches.update(record["id"], status="sent", result=result, error="")
                 sent += 1
-            return {"sent": sent, "failed": failed}
+            return {"sent": sent, "failed": failed, "skipped": skipped, "target_job": target}
 
         return await run_in_threadpool(_run)
 
     @app.get("/api/boss/automation/status")
     async def automation_status():
         return {"running": automation.running}
+
+    @app.get("/api/boss/target-job")
+    async def boss_target_job():
+        """目标岗位选择器数据：读取本地缓存，不调用 boss-cli，避免浏览器忙时下拉框取不到值。"""
+        return {
+            "target_job": automation.target_job(),
+            "positions": automation_store.list_available() or sorted(automation_store.list_positions()),
+        }
+
+    @app.post("/api/boss/target-job")
+    async def set_boss_target_job(payload: BossTargetJobInput):
+        settings = settings_store.load()
+        settings.boss_target_job = payload.job.strip()
+        saved = settings_store.save(settings)
+        return {"target_job": saved.effective_boss_target_job}
 
     @app.post("/api/boss/automation/run")
     async def automation_run():

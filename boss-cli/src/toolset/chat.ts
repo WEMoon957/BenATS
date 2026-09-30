@@ -7,7 +7,7 @@ import {
   sleepRandom,
 } from '../browser/index.js';
 import { isBossChatIndexUrl } from '../common/auth.js';
-import { ensureChatListReady } from './list.js';
+import { ensureChatListReady, LIST_SCROLL_MAX_ROUNDS, SCROLL_LIST_DOWN_SCRIPT, SCROLL_LIST_TO_TOP_SCRIPT } from './list.js';
 
 type ChatFrom = 'friend' | 'myself' | 'system' | 'unknown';
 
@@ -568,60 +568,53 @@ export async function runOpenCandidateChat(
     }
 
     const norm = (v: string | null | undefined) => (v ?? '').replace(/\s+/g, ' ').trim();
-    const matcher = (value: string) =>
-      exact ? value === targetName : value.includes(targetName);
-    let targetWrap: Awaited<ReturnType<typeof page.$>> | null = null;
     let foundName = '';
 
-    const maxScrollRounds = 40;
-    for (let round = 0; round < maxScrollRounds && !targetWrap; round++) {
-      const wraps = await page.$$('.geek-item-wrap');
-      for (const wrap of wraps) {
-        const nameText = await wrap
-          .$eval('.geek-name', (el) => (el.textContent ?? '').trim())
-          .catch(() => '');
-        const candidate = norm(nameText);
-        if (!candidate) continue;
-        if (matcher(candidate)) {
-          targetWrap = wrap;
-          foundName = candidate;
-          break;
-        }
+    // 会话列表是虚拟列表（可达上千条），未滚到可视区的行不在 DOM 里，
+    // 因此必须从顶部逐屏下滚匹配；匹配也在页面内一次完成，避免每行一次 CDP 往返。
+    const findRowScript = `(() => {
+      const target = ${JSON.stringify(targetName)};
+      const exactMatch = ${JSON.stringify(exact)};
+      const norm = (v) => (v ?? "").replace(/\\s+/g, " ").trim();
+      const matches = (value) => (exactMatch ? value === target : value.includes(target));
+      const wraps = Array.from(document.querySelectorAll(".geek-item-wrap"));
+      const hit = wraps.find((el) => matches(norm(el.querySelector(".geek-name")?.textContent)));
+      let node = document.querySelector(".geek-item");
+      let scroller = null;
+      while (node) {
+        if (node.scrollHeight > node.clientHeight) { scroller = node; break; }
+        node = node.parentElement;
       }
-      if (targetWrap) break;
+      return {
+        matchedName: hit ? norm(hit.querySelector(".geek-name")?.textContent) : "",
+        hasScroller: !!scroller,
+        atEnd: scroller
+          ? scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2
+          : true,
+      };
+    })()`;
 
-      const scrollState = (await page.evaluate(`(() => {
-        const first = document.querySelector(".geek-item-wrap");
-        if (!first) return { moved: false, atEnd: true };
-        let node = first.parentElement;
-        let scroller = null;
-        while (node) {
-          const style = window.getComputedStyle(node);
-          const overflowY = style.overflowY;
-          const canScroll =
-            (overflowY === "auto" || overflowY === "scroll") &&
-            node.scrollHeight > node.clientHeight;
-          if (canScroll) {
-            scroller = node;
-            break;
-          }
-          node = node.parentElement;
-        }
-        if (!scroller) return { moved: false, atEnd: true };
-        const prev = scroller.scrollTop;
-        const step = Math.max(160, Math.floor(scroller.clientHeight * 0.8));
-        scroller.scrollTop = Math.min(scroller.scrollTop + step, scroller.scrollHeight);
-        const moved = scroller.scrollTop !== prev;
-        const atEnd = scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2;
-        return { moved, atEnd };
-      })()`)) as { moved: boolean; atEnd: boolean };
-      if (!scrollState.moved || scrollState.atEnd) {
+    await page.evaluate(SCROLL_LIST_TO_TOP_SCRIPT);
+    await sleepRandom(OPEN_CHAT_SCROLL_GAP_MS.min, OPEN_CHAT_SCROLL_GAP_MS.max);
+
+    for (let round = 0; round < LIST_SCROLL_MAX_ROUNDS; round++) {
+      const state = (await page.evaluate(findRowScript)) as {
+        matchedName: string;
+        hasScroller: boolean;
+        atEnd: boolean;
+      };
+      if (state.matchedName) {
+        foundName = norm(state.matchedName);
         break;
       }
+      if (!state.hasScroller || state.atEnd) {
+        break;
+      }
+      await page.evaluate(SCROLL_LIST_DOWN_SCRIPT);
       await sleepRandom(OPEN_CHAT_SCROLL_GAP_MS.min, OPEN_CHAT_SCROLL_GAP_MS.max);
     }
 
-    if (!targetWrap) {
+    if (!foundName) {
       throw new Error(`未在聊天列表中找到候选人：${targetName}`);
     }
 

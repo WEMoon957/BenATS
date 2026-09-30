@@ -4,7 +4,7 @@ import { sleepRandom } from '../browser/index.js';
 import { withBossSessionPage } from '../common/boss_session_page.js';
 import { clickBossSidebarMenuToPath } from '../common/boss_sidebar_nav.js';
 import { JD_DIR } from '../config.js';
-import type { Frame, Page } from 'puppeteer-core';
+import type { ElementHandle, Frame, Page } from 'puppeteer-core';
 
 export type ListOpenPositionsDeps = {
   settleWaitMsMin?: number;
@@ -18,32 +18,6 @@ export type ListOpenPositionsDeps = {
 const BOSS_CHAT_JOB_LIST_URL = 'https://www.zhipin.com/web/chat/job/list';
 const JD_PAGE_SETTLE_MS = { min: 3200, max: 5600 } as const;
 const JD_DETAIL_DEFAULT_WAIT_MS = 10_000;
-const CLICK_JD_BACK_BUTTON_SCRIPT = `(() => {
-  const isVisible = (el) => {
-    if (!(el instanceof HTMLElement)) return false;
-    const st = window.getComputedStyle(el);
-    if (st.display === "none" || st.visibility === "hidden") return false;
-    const r = el.getBoundingClientRect();
-    return r.width > 0 && r.height > 0;
-  };
-  const topNav = document.querySelector(".top-nav");
-  if (!(topNav instanceof HTMLElement)) {
-    return false;
-  }
-  const backBtn = topNav.querySelector(".history-back-container .back-btn");
-  const icon = backBtn?.querySelector("i.iboss-right");
-  if (!(icon instanceof HTMLElement)) {
-    return false;
-  }
-  if (!(backBtn instanceof HTMLElement) || !isVisible(backBtn)) {
-    return false;
-  }
-  backBtn.scrollIntoView({ block: "center", inline: "nearest" });
-  backBtn.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
-  backBtn.click();
-  return true;
-})()`;
-
 function isBossChatJobListUrl(url: string): boolean {
   try {
     const u = new URL(url);
@@ -259,12 +233,10 @@ async function waitForJobRowsReady(
 }
 
 async function clickEditForJob(frame: Frame, job: JobListItem): Promise<void> {
-  const targetId = JSON.stringify(job.id ?? '');
-  const targetTitle = JSON.stringify(job.title ?? '');
-  const clicked = (await frame.evaluate(
+  const handle = await frame.evaluateHandle(
     `(() => {
-      const jobId = ${targetId};
-      const title = ${targetTitle};
+      const jobId = ${JSON.stringify(job.id ?? '')};
+      const title = ${JSON.stringify(job.title ?? '')};
       const norm = (v) => (v ?? "").replace(/\\s+/g, " ").trim();
       const rows = Array.from(document.querySelectorAll(".job-item-container"));
       let row = null;
@@ -272,79 +244,62 @@ async function clickEditForJob(frame: Frame, job: JobListItem): Promise<void> {
         row = rows.find((el) => norm(el.getAttribute("data-id")) === jobId) ?? null;
       }
       if (!row && title) {
-        row = rows.find((el) => {
-          const t = norm(el.querySelector(".job-name")?.textContent);
-          return t === title;
-        }) ?? null;
+        row = rows.find((el) => norm(el.querySelector(".job-name")?.textContent) === title) ?? null;
       }
-      if (!row) return false;
-      const editBtn = row.querySelector(".position-edit");
-      if (!(editBtn instanceof HTMLElement)) return false;
-      editBtn.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
-      editBtn.click();
-      return true;
+      if (!row) return null;
+      return Array.from(row.querySelectorAll(".operate-btn")).find((el) => norm(el.textContent) === "编辑") ?? null;
     })()`,
-  )) as boolean;
-  if (!clicked) {
+  );
+  const editBtn = handle.asElement() as ElementHandle<Element> | null;
+  if (!editBtn) {
+    await handle.dispose();
     throw new Error(`未找到职位“${job.title}”的编辑入口`);
   }
+  await editBtn.hover();
+  await editBtn.click();
+  await handle.dispose().catch(() => undefined);
 }
 
 async function readJobDetailFromFrame(frame: Frame): Promise<JobDetail | null> {
   const detail = (await frame.evaluate(
     `(() => {
       const norm = (v) => (v ?? "").replace(/\\s+/g, " ").trim();
-      const root = document.querySelector(".job-edit-container.edit-job");
+      const root = document.querySelector(".job-edit-container");
       if (!root) {
         return null;
       }
-      const rows = Array.from(root.querySelectorAll(".form-row"));
-      const rowValueByTitle = {};
-      for (const row of rows) {
-        const title = norm(row.querySelector(".title")?.textContent);
-        if (!title) continue;
-        const content = norm(row.querySelector(".content")?.innerText);
-        if (content && !rowValueByTitle[title]) {
-          rowValueByTitle[title] = content;
-        }
-      }
-      const salaryValues = Array.from(
-        root.querySelectorAll(".scope-selecter .scope-select .ui-select-selected-value"),
-      ).map((el) => norm(el.textContent));
-      const keywordValues = Array.from(
-        root.querySelectorAll(".job-skill-content .job-skill-item, .job-skill-content .skill-tag, .job-skill-content .tag"),
-      )
+      const rowStartingWith = (label) =>
+        Array.from(root.querySelectorAll(".publish-edit-form-row")).find((row) =>
+          norm(row.textContent).startsWith(label),
+        ) ?? null;
+      const rowSelectValue = (label) => {
+        const row = rowStartingWith(label);
+        return row ? norm(row.querySelector(".ui-select-selected-value")?.textContent) : "";
+      };
+      const salaryRow = rowStartingWith("薪资范围");
+      const salaryValues = salaryRow
+        ? Array.from(salaryRow.querySelectorAll(".ui-select-selected-value")).map((el) => norm(el.textContent))
+        : [];
+      const keywordValues = Array.from(root.querySelectorAll(".job-skill-content .selected-skill-item"))
         .map((el) => norm(el.textContent))
         .filter(Boolean);
+      const addressRow = rowStartingWith("工作地址");
       const detail = {
         pageTitle: document.title || "",
         pageUrl: location.href,
-        company: norm(root.querySelector(".base-info .text-primary")?.textContent),
-        recruitmentType: norm(root.querySelector(".recruitment-type-wrap .ui-select-selected-value")?.textContent),
-        jobName:
-          norm(root.querySelector("input[name='jobName']")?.value) ||
-          norm(root.querySelector(".job-name input")?.value) ||
-          (rowValueByTitle["职位名称"] || ""),
-        description: norm(root.querySelector(".performance-row textarea")?.value),
-        overseas: norm(root.querySelector(".overseas-entry-container .chose-item.active")?.textContent),
-        jobCategory:
-          norm(root.querySelector("input[name='jobCategory']")?.value) ||
-          norm(root.querySelector(".job-category-tag-container")?.innerText),
-        experience:
-          norm(root.querySelector(".job-experience-row .experience-select .ui-select-selected-value")?.textContent) ||
-          (rowValueByTitle["经验"] || ""),
-        education:
-          norm(root.querySelector(".form-row .title")?.textContent?.includes("学历")
-            ? root.querySelector(".form-row .experience-select .ui-select-selected-value")?.textContent
-            : "") ||
-          (rowValueByTitle["学历"] || ""),
+        company: norm(root.querySelector(".company-info-container")?.textContent).replace(/^公\\s*司\\s*/, ""),
+        recruitmentType: rowSelectValue("招聘类型"),
+        jobName: norm(root.querySelector("input[name='jobName']")?.value),
+        description: norm(root.querySelector(".job-description-container textarea")?.value),
+        overseas: "",
+        jobCategory: norm(root.querySelector("input[name='jobCategory']")?.value),
+        experience: rowSelectValue("经验"),
+        education: rowSelectValue("学历"),
         salaryRange:
           salaryValues.length >= 2 ? (salaryValues[0] + "-" + salaryValues[1]) : salaryValues.join("-"),
-        salaryMonths: norm(root.querySelector(".salaryMonth-select .ui-select-selected-value")?.textContent),
+        salaryMonths: salaryValues.length >= 3 ? salaryValues[2] : "",
         keywords: keywordValues.join("｜"),
-        workLocation:
-          norm(root.querySelector(".job-address input.ipt")?.value) ||
-          (rowValueByTitle["工作地点"] || ""),
+        workLocation: norm(addressRow?.querySelector("input.ipt")?.value),
       };
       return detail;
     })()`,
@@ -367,20 +322,12 @@ async function waitForJobDetailReady(page: Page, timeoutMs: number): Promise<Job
     }
     await sleepRandom(260, 520);
   }
-  throw new Error('等待职位详情表单超时，未找到 .job-edit-container.edit-job');
+  throw new Error('等待职位详情表单超时，未找到 .job-edit-container');
 }
 
-async function closeJobDetailPanel(page: Page, timeoutMs = 8_000): Promise<void> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    const backClicked = (await page.evaluate(CLICK_JD_BACK_BUTTON_SCRIPT)) as boolean;
-    if (backClicked) {
-      return;
-    }
-    await sleepRandom(160, 360);
-  }
-
-  throw new Error('已读取职位详情，但未找到 top-nav 内可点击的返回按钮（.history-back-container .back-btn > i.iboss-right）。');
+async function closeJobDetailPanel(page: Page): Promise<void> {
+  await page.goto(BOSS_CHAT_JOB_LIST_URL, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await sleepRandom(600, 1200);
 }
 
 function formatJobDetailMarkdown(job: JobListItem, detail: JobDetail): string {

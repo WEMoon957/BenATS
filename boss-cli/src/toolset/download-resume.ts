@@ -125,22 +125,24 @@ async function waitForDownloadedFile(
   throw new Error(`等待附件简历下载落盘超时（${timeoutMs / 1000}s）。`);
 }
 
-/** 从 pdf-viewer iframe 的 `url` 参数中取出真实附件下载地址。 */
-const READ_PDF_VIEWER_URL_SCRIPT = `(() => {
-  const ifr = Array.from(document.querySelectorAll('iframe'))
+/** 读取页面中全部 pdf-viewer iframe 的 url 参数，用于识别本次预览新打开的那一个。 */
+const READ_PDF_VIEWER_URLS_SCRIPT = `(() => {
+  return Array.from(document.querySelectorAll('iframe'))
     .map((f) => f.getAttribute('src') || '')
-    .find((s) => s.includes('pdf-viewer'));
-  if (!ifr) return '';
-  const u = new URL(ifr, location.href);
-  return u.searchParams.get('url') || '';
+    .filter((s) => s.includes('pdf-viewer'))
+    .map((s) => new URL(s, location.href).searchParams.get('url') || '')
+    .filter(Boolean);
 })()`;
 
 /**
  * 点击「点击预览附件简历」，从 pdf-viewer iframe 里取出真实下载地址并抓取 PDF，返回本地路径。
  * BOSS 把附件简历改成「点击预览」后无 `a[download]` 入口，预览实际是一个指向 PDF 的 pdf-viewer iframe。
+ * 页面会保留历史预览的 iframe，且每次点击都会再追加一个，因此只认追加后的最后一个，避免下成别人的简历。
  */
 async function downloadAttachmentResumeFromPreview(page: Page, candidateName: string): Promise<string> {
   ensureAppDataLayout();
+
+  const opened = (await page.evaluate(READ_PDF_VIEWER_URLS_SCRIPT)) as string[];
 
   const clicked = (await page.evaluate(CLICK_PREVIEW_TRIGGER_SCRIPT)) as boolean;
   if (!clicked) {
@@ -150,12 +152,15 @@ async function downloadAttachmentResumeFromPreview(page: Page, candidateName: st
   const deadline = Date.now() + PDF_VIEWER_IFRAME_WAIT_MAX_MS;
   let pdfUrl = '';
   while (Date.now() < deadline) {
-    pdfUrl = (await page.evaluate(READ_PDF_VIEWER_URL_SCRIPT)) as string;
-    if (pdfUrl) break;
+    const urls = (await page.evaluate(READ_PDF_VIEWER_URLS_SCRIPT)) as string[];
+    if (urls.length > opened.length) {
+      pdfUrl = urls[urls.length - 1];
+      break;
+    }
     await new Promise((resolve) => setTimeout(resolve, PDF_VIEWER_POLL_MS));
   }
   if (!pdfUrl) {
-    throw new Error('点击预览后未出现附件简历 PDF 预览（pdf-viewer iframe）。');
+    throw new Error('点击预览后未出现新的附件简历 PDF 预览（pdf-viewer iframe）。');
   }
 
   const base64 = (await page.evaluate(`(async () => {

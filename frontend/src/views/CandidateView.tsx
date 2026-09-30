@@ -28,6 +28,83 @@ interface StageItem {
   label: string;
 }
 
+interface RubricItem {
+  id: string;
+  name: string;
+  weight: number;
+}
+
+interface RubricGroup {
+  name: string;
+  items: RubricItem[];
+}
+
+interface Rubric {
+  job_title: string;
+  job_context?: string;
+  groups: RubricGroup[];
+  total: number;
+}
+
+interface ItemScore {
+  item_id: string;
+  score: number;
+  evidence?: string;
+}
+
+interface ScoreDetail {
+  item_scores?: ItemScore[];
+  bonus?: number;
+  bonus_reason?: string;
+  veto_hits?: string[];
+  warnings?: string[];
+  highlight?: string;
+  risk?: string;
+  phone_questions?: string[];
+  base_score?: number;
+  total?: number;
+  grade?: string;
+  action?: string;
+  priority?: string;
+}
+
+/** 评分项 id 只在组内唯一，全局引用写作「组字母 + 项 id」（与后端 all_items() 一致）。 */
+function itemKey(groupIndex: number, itemId: string): string {
+  return `${String.fromCharCode(65 + groupIndex)}${itemId}`;
+}
+
+function RubricBreakdown({ rubric, scores }: { rubric: Rubric; scores: Map<string, ItemScore> }) {
+  return (
+    <div className="rec-detail-rubric">
+      <div className="rec-rubric-lead">
+        逐项得分（{rubric.job_title} · {rubric.total} 分制）
+      </div>
+      {rubric.groups.map((group, gi) => (
+        <div className="rec-rubric-group" key={group.name}>
+          <div className="rec-rubric-group-head">{group.name}</div>
+          <ul className="rec-rubric-items">
+            {group.items.map((item) => {
+              const key = itemKey(gi, item.id);
+              const scored = scores.get(key);
+              return (
+                <li key={item.id} className={`rec-rubric-item is-${scored ? scored.score : "none"}`}>
+                  <div className="rec-rubric-item-head">
+                    <span className="rec-rubric-item-key">{key}</span>
+                    <span className="rec-rubric-item-name">{item.name}</span>
+                    <span className="rec-rubric-item-weight">{item.weight} 分</span>
+                    <span className="rec-rubric-item-score">{scored ? `${scored.score}/5` : "未评"}</span>
+                  </div>
+                  {scored?.evidence ? <p className="rec-rubric-item-evidence">{scored.evidence}</p> : null}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 const COLUMNS: { key: string; label: string; stages: string[] }[] = [
   { key: "greeting_pending", label: "待打招呼", stages: ["discovered", "greeting_pending"] },
   { key: "greeted", label: "已打招呼", stages: ["greeted"] },
@@ -44,13 +121,16 @@ const SCORE_SHORT: Record<string, string> = {
   "C不推进": "C",
 };
 
+/** 预评分写入中文四档，自动打分写入 S/A/B/D，统一取首字母决定配色。 */
 function scoreClass(score: string): string {
   if (!score) return "";
-  return `is-${SCORE_SHORT[score]?.toLowerCase() ?? "b"}`;
+  const short = SCORE_SHORT[score] ?? score.trim().charAt(0).toUpperCase();
+  return short ? `is-${short.toLowerCase()}` : "";
 }
 
 function CandidateCard({
   candidate,
+  rubric,
   stages,
   selected,
   onToggle,
@@ -58,6 +138,7 @@ function CandidateCard({
   onDelete,
 }: {
   candidate: Candidate;
+  rubric?: Rubric;
   stages: StageItem[];
   selected: boolean;
   onToggle: (id: number) => void;
@@ -65,13 +146,16 @@ function CandidateCard({
   onDelete: (candidate: Candidate) => void;
 }) {
   const [open, setOpen] = useState(false);
-  let detail: Record<string, unknown> | null = null;
+  let detail: ScoreDetail | null = null;
   try {
-    detail = candidate.score_detail ? (JSON.parse(candidate.score_detail) as Record<string, unknown>) : null;
+    detail = candidate.score_detail ? (JSON.parse(candidate.score_detail) as ScoreDetail) : null;
   } catch {
     detail = null;
   }
-  const questions = Array.isArray(detail?.phone_questions) ? (detail!.phone_questions as string[]) : [];
+  const questions = detail?.phone_questions ?? [];
+  const vetoes = detail?.veto_hits ?? [];
+  const warnings = detail?.warnings ?? [];
+  const scores = new Map((detail?.item_scores ?? []).map((s) => [s.item_id, s]));
   return (
     <li className={`rec-card ${scoreClass(candidate.pre_score)}`}>
       <div className="rec-card-head" onClick={() => setOpen(!open)} role="button" tabIndex={0}>
@@ -94,8 +178,27 @@ function CandidateCard({
       {candidate.pre_score_reason && <p className="rec-card-reason">{candidate.pre_score_reason}</p>}
       {open && detail && (
         <div className="rec-card-detail">
-          {detail.highlight ? <p className="rec-detail-line"><strong>亮点：</strong>{String(detail.highlight)}</p> : null}
-          {detail.risk ? <p className="rec-detail-line"><strong>风险：</strong>{String(detail.risk)}</p> : null}
+          <div className="rec-detail-summary">
+            {detail.action ? <span className="rec-detail-action">{detail.action}</span> : null}
+            {detail.priority ? <span className="rec-detail-priority">{detail.priority}</span> : null}
+            <span className="rec-detail-score">
+              {rubric
+                ? `基础分 ${detail.base_score ?? 0} + 加分 ${detail.bonus ?? 0} = ${detail.total ?? 0} / ${rubric.total}`
+                : `总分 ${detail.total ?? 0}`}
+            </span>
+          </div>
+          {detail.highlight ? <p className="rec-detail-line"><strong>亮点：</strong>{detail.highlight}</p> : null}
+          {detail.risk ? <p className="rec-detail-line"><strong>风险：</strong>{detail.risk}</p> : null}
+          {vetoes.length > 0 && (
+            <p className="rec-detail-flags is-veto"><strong>否决命中：</strong>{vetoes.join("、")}</p>
+          )}
+          {warnings.length > 0 && (
+            <p className="rec-detail-flags is-warning"><strong>待确认卡点：</strong>{warnings.join("、")}</p>
+          )}
+          {rubric && scores.size > 0 ? <RubricBreakdown rubric={rubric} scores={scores} /> : null}
+          {detail.bonus_reason ? (
+            <p className="rec-detail-line"><strong>加分说明：</strong>{detail.bonus_reason}</p>
+          ) : null}
           {questions.length > 0 && (
             <div className="rec-detail-questions">
               <strong>电话必问：</strong>
@@ -125,18 +228,21 @@ function CandidateCard({
 export function CandidateView({ onToast }: CandidateViewProps) {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [stages, setStages] = useState<StageItem[]>([]);
+  const [rubrics, setRubrics] = useState<Record<string, Rubric>>({});
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
   const [adding, setAdding] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const [c, s] = await Promise.all([
+      const [c, s, r] = await Promise.all([
         api<{ candidates: Candidate[] }>("/api/recruitment/candidates"),
         api<{ stages: StageItem[] }>("/api/recruitment/stages"),
+        api<{ rubrics: Record<string, Rubric> }>("/api/recruitment/rubrics"),
       ]);
       setCandidates(c.candidates);
       setStages(s.stages);
+      setRubrics(r.rubrics || {});
     } catch (error) {
       onToast((error as Error).message);
     }
@@ -238,6 +344,7 @@ export function CandidateView({ onToast }: CandidateViewProps) {
                   <CandidateCard
                     key={c.id}
                     candidate={c}
+                    rubric={rubrics[c.job_keyword]}
                     stages={stages}
                     selected={selected.has(c.id)}
                     onToggle={toggle}

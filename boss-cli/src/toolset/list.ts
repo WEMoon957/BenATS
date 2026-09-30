@@ -17,6 +17,99 @@ type CandidateItem = {
   unreadCount: number;
 };
 
+/** 滚动收集会话时最多执行多少轮，避免列表异常时无限滚动。会话列表可达上千条，轮数要够。 */
+export const LIST_SCROLL_MAX_ROUNDS = 200;
+
+/** 读取当前 DOM 里已渲染的会话条目，以及列表滚动容器的位置信息。 */
+const READ_LIST_STATE_SCRIPT = `(() => {
+  const norm = (v) => (v ?? "").replace(/\\s+/g, " ").trim();
+  const items = Array.from(document.querySelectorAll(".geek-item")).map((el) => {
+    const name = norm(el.querySelector(".geek-name")?.textContent);
+    const job = norm(el.querySelector(".source-job")?.textContent);
+    const time = norm(el.querySelector(".time")?.textContent);
+    const message = norm(el.querySelector(".push-text")?.textContent);
+    const badge = el.querySelector(".badge-count");
+    let unreadCount = 0;
+    if (badge) {
+      const digits = norm(badge.textContent).replace(/\\D/g, "");
+      if (digits) unreadCount = parseInt(digits, 10) || 0;
+    }
+    return { name, job, time, message, unreadCount };
+  });
+  let node = document.querySelector(".geek-item");
+  let scroller = null;
+  while (node) {
+    if (node.scrollHeight > node.clientHeight) { scroller = node; break; }
+    node = node.parentElement;
+  }
+  if (!scroller) return { items, atEnd: true };
+  return {
+    items,
+    atEnd: scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2,
+  };
+})()`;
+
+/** 把列表滚动容器回到顶部，确保从第一条开始收集。 */
+export const SCROLL_LIST_TO_TOP_SCRIPT = `(() => {
+  let node = document.querySelector(".geek-item");
+  let scroller = null;
+  while (node) {
+    if (node.scrollHeight > node.clientHeight) { scroller = node; break; }
+    node = node.parentElement;
+  }
+  if (!scroller) return false;
+  scroller.scrollTop = 0;
+  return true;
+})()`;
+
+/** 把列表滚动容器向下滚动约一屏（会话列表是虚拟列表，未滚到的条目不在 DOM 里）。 */
+export const SCROLL_LIST_DOWN_SCRIPT = `(() => {
+  let node = document.querySelector(".geek-item");
+  let scroller = null;
+  while (node) {
+    if (node.scrollHeight > node.clientHeight) { scroller = node; break; }
+    node = node.parentElement;
+  }
+  if (!scroller) return false;
+  const step = Math.max(240, Math.round(scroller.clientHeight * 0.85));
+  scroller.scrollTop = Math.min(scroller.scrollTop + step, scroller.scrollHeight);
+  return true;
+})()`;
+
+/**
+ * 滚动列表并收集全部会话：先回到顶部，再逐屏读取并下滚，最后按姓名合并去重。
+ * 虚拟列表只保留可视区附近的节点，因此必须边滚边收，不能只读一次。
+ */
+async function collectAllCandidates(page: Page): Promise<CandidateItem[]> {
+  await page.evaluate(SCROLL_LIST_TO_TOP_SCRIPT);
+  await sleepRandom(LIST_POLL_MS.min, LIST_POLL_MS.max);
+
+  const collected = new Map<string, CandidateItem>();
+  let previousCount = -1;
+  for (let round = 0; round < LIST_SCROLL_MAX_ROUNDS; round++) {
+    const state = (await page.evaluate(READ_LIST_STATE_SCRIPT)) as {
+      items: CandidateItem[];
+      atEnd: boolean;
+    };
+    for (const item of state.items) {
+      if (item.name && !collected.has(item.name)) {
+        collected.set(item.name, item);
+      }
+    }
+    if (state.atEnd && collected.size === previousCount) {
+      break;
+    }
+    previousCount = collected.size;
+    if (state.atEnd) {
+      await sleepRandom(LIST_POLL_MS.min, LIST_POLL_MS.max);
+      continue;
+    }
+    await page.evaluate(SCROLL_LIST_DOWN_SCRIPT);
+    await sleepRandom(LIST_POLL_MS.min, LIST_POLL_MS.max);
+  }
+  return [...collected.values()];
+}
+
 async function waitForCandidateListSettled(
   page: Page,
   opts: { timeoutMs: number; pollMsMin: number; pollMsMax: number; minMsBeforeEmptyOk: number },
@@ -129,26 +222,7 @@ export async function runGetCandidateList(
     return await withBossSessionPage(async (page) => {
       await ensureChatListReady(page, unreadOnly ? 'unread' : 'all');
 
-      const items = (await page.evaluate(
-        `(() => {
-          const norm = (v) => (v ?? "").replace(/\\s+/g, " ").trim();
-          return Array.from(document.querySelectorAll(".geek-item")).map((el) => {
-            const name = norm(el.querySelector(".geek-name")?.textContent);
-            const job = norm(el.querySelector(".source-job")?.textContent);
-            const time = norm(el.querySelector(".time")?.textContent);
-            const message = norm(el.querySelector(".push-text")?.textContent);
-            const badge = el.querySelector(".badge-count");
-            let unreadCount = 0;
-            if (badge) {
-              const digits = norm(badge.textContent).replace(/\\D/g, "");
-              if (digits) unreadCount = parseInt(digits, 10) || 0;
-            }
-            return { name, job, time, message, unreadCount };
-          });
-        })()`,
-      )) as CandidateItem[];
-
-      const candidates = items.filter((it) => it.name) as CandidateItem[];
+      const candidates = await collectAllCandidates(page);
       const withUnread = candidates.filter((it) => it.unreadCount > 0).length;
       const visible = unreadOnly ? candidates : candidates;
       const lines = visible.map((it, idx) => {

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from fastapi import FastAPI, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
@@ -60,6 +62,12 @@ def register_routes(app: FastAPI, store: RecruitmentStore) -> None:
     @app.get("/api/recruitment/stages")
     async def list_stages():
         return {"stages": [{"value": s, "label": STAGE_LABELS[s]} for s in STAGES]}
+
+    @app.get("/api/recruitment/rubrics")
+    async def list_rubrics():
+        """按岗位返回已生成的加权评分标准，供界面展示逐项得分。"""
+        rows = store.query("SELECT job_keyword, rubric FROM job_rubric WHERE job_keyword != ''")
+        return {"rubrics": {row["job_keyword"]: json.loads(row["rubric"]) for row in rows}}
 
     @app.get("/api/recruitment/candidates")
     async def list_candidates(

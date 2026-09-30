@@ -70,12 +70,12 @@ def _sheet_veto(ws, rubric, results):
 
 
 def _sheet_scores(ws, rubric, results):
-    items = [(item.id, item) for group in rubric.groups for item in group.items]
+    items = rubric.all_items()
     title = f"{rubric.job_title} · 简历评分表（{rubric.total} 分制 · {len(items)} 项 · {len(results)} 人）"
     ws.append([title])
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(items) + 8)
     ws.cell(1, 1).font = Font(bold=True)
-    header = ["排名", "姓名"] + [f"{item.id}{item.name}" for _, item in items] + ["基础分", "加分", "总分", "等级", "一票否决/待确认", "建议动作", "优先级"]
+    header = ["排名", "姓名"] + [f"{key}{item.name}" for key, item in items] + ["基础分", "加分", "总分", "等级", "一票否决/待确认", "建议动作", "优先级"]
     ws.append(header)
     ordered = sorted(results, key=lambda r: -r.total)
     for rank, r in enumerate(ordered, start=1):

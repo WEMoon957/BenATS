@@ -16,6 +16,7 @@ from pathlib import Path
 
 from .boss_cli import BossCliConnector, BossCliError
 from .outreach import OutreachAction, OutreachStore, execute_outreach
+from ..config import AppSettings
 from ..repository import JobRepository
 from ..pipeline import EvaluationEngine
 
@@ -27,13 +28,26 @@ RESUME_REQUEST_FAILURE_THRESHOLD = 3
 # 对主动发来消息的候选人，回复并附带求简历的默认话术
 INBOUND_REPLY_TEXT = "您好，方便发一份您的简历吗？"
 
-# 目标岗位：MVP 阶段只处理这一个岗位（可用环境变量 BENATS_TARGET_JOB 覆盖；留空则处理全部职位）
-TARGET_JOB_KEYWORD = os.getenv("BENATS_TARGET_JOB", "新媒体运营总监").strip()
+# 简历类附件后缀：未读消息里对方发来的附件简历显示为文件名，用于判断对方是否已发简历
+RESUME_FILE_SUFFIXES = (".pdf", ".doc", ".docx", ".jpg", ".jpeg", ".png", ".zip")
+
+# 附件简历已到手的候选人状态：无需再次向对方索要简历
+RESUME_RECEIVED_STATUSES = frozenset({"resume_ready", "resume_downloaded"})
 
 
-def _is_target_job(name: str) -> bool:
-    """判断职位是否为目标岗位；未配置目标岗位时视为全部处理。"""
-    return not TARGET_JOB_KEYWORD or name.strip() == TARGET_JOB_KEYWORD or TARGET_JOB_KEYWORD in name
+def _is_target_job(name: str, target: str) -> bool:
+    """判断职位是否为目标岗位；目标岗位为空时视为全部处理。"""
+    return not target or name.strip() == target or target in name
+
+
+def _is_resume_card(message: str) -> bool:
+    """对方发来的「请求发送附件简历」确认卡片（需先同意接收）。"""
+    return "附件简历" in message
+
+
+def _is_resume_file(message: str) -> bool:
+    """对方发来的附件简历本身：聊天列表里显示为文件名（如「张三简历.pdf」）。"""
+    return message.strip().lower().endswith(RESUME_FILE_SUFFIXES)
 
 
 def _fingerprint_bytes(data: bytes) -> str:
@@ -88,6 +102,15 @@ class AutomationStore:
 
     def list_positions(self) -> dict:
         return dict(self._data["positions"])
+
+    def remember_available(self, names: list[str]) -> None:
+        """记录最近一次从 BOSS 拉到的全部职位名，供界面选择目标岗位。"""
+        with self._lock:
+            self._data["available_positions"] = sorted({name for name in names if name})
+            self._save()
+
+    def list_available(self) -> list[str]:
+        return list(self._data.get("available_positions", []))
 
     @staticmethod
     def _candidate_key(job_id: str, name: str) -> str:
@@ -161,6 +184,13 @@ class AutomationEngine:
         self.interval = interval_seconds
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        # 同一时刻只允许一轮：后台轮询与「运行一轮」并发会同时驱动浏览器，互相抢会话锁
+        self._round_lock = threading.Lock()
+
+    @property
+    def stopping(self) -> bool:
+        """是否已收到停止请求；轮内各步骤据此及时收尾，避免一整轮跑十几分钟停不下来。"""
+        return self._stop.is_set()
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -176,6 +206,12 @@ class AutomationEngine:
     def running(self) -> bool:
         return bool(self._thread and self._thread.is_alive())
 
+    def target_job(self) -> str:
+        """当前生效的目标岗位：每轮实时读取设置项，未配置时回退到环境变量与默认岗位。"""
+        if self.settings_store is None:
+            return AppSettings().effective_boss_target_job
+        return self.settings_store.load().effective_boss_target_job
+
     def _loop(self) -> None:
         while not self._stop.is_set():
             try:
@@ -185,17 +221,23 @@ class AutomationEngine:
             self._stop.wait(self.interval)
 
     def run_once(self) -> dict:
-        summary = {
-            "positions_created": self.sync_positions(),
-            "outreaches_created": self.sync_candidates(),
-            "inbound_created": self.sync_inbound(),
-            "resume_requests_accepted": self.auto_accept_resumes(),
-            "outreaches_reconciled": self.sync_outreach_results(),
-            "resumes_downloaded": self.sync_resumes(),
-            "candidates_scored": self.sync_scoring(),
-            "jobs_started": self.start_ready_jobs(),
-            "s_calls_synced": self.sync_s_calls(),
-        }
+        if not self._round_lock.acquire(blocking=False):
+            logger.info("已有自动化轮次在执行，本次跳过")
+            return {"skipped": "busy"}
+        try:
+            summary = {
+                "positions_created": self.sync_positions(),
+                "outreaches_created": self.sync_candidates(),
+                "inbound_created": self.sync_inbound(),
+                "resume_requests_accepted": self.auto_accept_resumes(),
+                "outreaches_reconciled": self.sync_outreach_results(),
+                "resumes_downloaded": self.sync_resumes(),
+                "candidates_scored": self.sync_scoring(),
+                "jobs_started": self.start_ready_jobs(),
+                "s_calls_synced": self.sync_s_calls(),
+            }
+        finally:
+            self._round_lock.release()
         return summary
 
     def sync_scoring(self) -> int:
@@ -208,6 +250,9 @@ class AutomationEngine:
             result = auto_score_candidates(
                 self.recruitment_store, self.repository, self.settings_store, self.boss
             )
+            if not result.get("ok"):
+                logger.warning("自动评分未执行：%s", result.get("detail") or "未知原因")
+                return 0
             return int(result.get("scored", 0))
         except Exception as exc:  # noqa: BLE001
             logger.warning("自动评分一轮失败：%s", exc)
@@ -221,11 +266,15 @@ class AutomationEngine:
         except BossCliError as exc:
             logger.warning("拉取职位失败：%s", exc)
             return 0
+        target = self.target_job()
+        self.store.remember_available([p["name"] for p in positions])
         for position in positions:
+            if self.stopping:
+                break
             name = position["name"]
             if not name or self.store.has_position(name):
                 continue
-            if not _is_target_job(name):
+            if not _is_target_job(name, target):
                 continue
             try:
                 jd_text = self.boss.fetch_jd(name)
@@ -240,10 +289,13 @@ class AutomationEngine:
         return created
 
     def sync_candidates(self) -> int:
-        """拉取每个职位的推荐候选人，写入候选人库并生成打招呼草稿（待 HR 审核）。"""
+        """拉取目标岗位的推荐候选人，写入候选人库并生成打招呼草稿（待 HR 审核）。"""
         created = 0
+        target = self.target_job()
         for name, info in self.store.list_positions().items():
-            if not _is_target_job(name):
+            if self.stopping:
+                break
+            if not _is_target_job(name, target):
                 continue
             job_id = info["job_id"]
             try:
@@ -283,8 +335,10 @@ class AutomationEngine:
             (name, job_keyword, job_id, stage, _now(), _now()),
         )
 
-    def _set_candidate_stage(self, name: str, job_keyword: str, job_id: str, stage: str) -> None:
-        """把候选人阶段推进到指定值（不存在则新增），无 recruitment_store 时跳过。"""
+    def _set_candidate_stage(
+        self, name: str, job_keyword: str, job_id: str, stage: str, resume_file: str | None = None
+    ) -> None:
+        """把候选人阶段推进到指定值（不存在则新增），可同时登记附件简历文件名。"""
         if self.recruitment_store is None:
             return
         from ..recruitment.db import _now
@@ -292,22 +346,30 @@ class AutomationEngine:
         existing = self.recruitment_store.query_one(
             "SELECT id FROM candidate WHERE name = ? AND job_keyword = ?", (name, job_keyword)
         )
+        now = _now()
         if existing:
-            self.recruitment_store.execute(
-                "UPDATE candidate SET stage = ?, updated_at = ? WHERE id = ?",
-                (stage, _now(), existing["id"]),
-            )
+            if resume_file is None:
+                self.recruitment_store.execute(
+                    "UPDATE candidate SET stage = ?, updated_at = ? WHERE id = ?",
+                    (stage, now, existing["id"]),
+                )
+            else:
+                self.recruitment_store.execute(
+                    "UPDATE candidate SET stage = ?, resume_file = ?, updated_at = ? WHERE id = ?",
+                    (stage, resume_file, now, existing["id"]),
+                )
         else:
             self.recruitment_store.execute(
-                "INSERT INTO candidate (name, job_keyword, job_id, source, stage, created_at, updated_at) "
-                "VALUES (?, ?, ?, 'boss', ?, ?, ?)",
-                (name, job_keyword, job_id, stage, _now(), _now()),
+                "INSERT INTO candidate (name, job_keyword, job_id, source, stage, resume_file, created_at, updated_at) "
+                "VALUES (?, ?, ?, 'boss', ?, ?, ?, ?)",
+                (name, job_keyword, job_id, stage, resume_file or "", now, now),
             )
 
     def sync_inbound(self) -> int:
-        """读取未读沟通列表（对方主动发来消息的人），生成两类草稿：
+        """读取未读沟通列表（对方主动发来消息的人），只处理目标岗位，按消息类型生成草稿：
 
-        - 消息为「请求发送附件简历」→ 「同意接收」草稿（kind=action, command=agree-resume）；
+        - 附件简历确认卡片 → 「同意接收」草稿（kind=action, command=agree-resume）；
+        - 对方已发来的附件简历 → 标记待下载，不发送任何消息；
         - 其他消息 → 「回复+求简历」草稿（kind=send, request_resume=True）。
         """
         created = 0
@@ -316,29 +378,48 @@ class AutomationEngine:
         except BossCliError as exc:
             logger.warning("读取未读候选人失败：%s", exc)
             return 0
-        positions = {name: info for name, info in self.store.list_positions().items() if name}
+        target = self.target_job()
+        positions = {
+            name: info
+            for name, info in self.store.list_positions().items()
+            if name and _is_target_job(name, target)
+        }
         for contact in contacts:
             contact_name = contact.get("name", "")
             if not contact_name:
                 continue
-            message = (contact.get("message") or "").strip()
             matched = _match_position((contact.get("job") or "").strip(), positions)
-            job_id = positions[matched]["job_id"] if matched else ""
-            if self.store.candidate_status(job_id, contact_name) is not None:
+            if not matched and target:
+                # 已选择目标岗位时，其他岗位的往来消息不进入流程
                 continue
+            job_id = positions[matched]["job_id"] if matched else ""
+            keyword = matched or ""
+            message = (contact.get("message") or "").strip()
+            status = self.store.candidate_status(job_id, contact_name)
             # 对方主动联系，自动写入候选人库（待打招呼）
-            self._upsert_candidate(contact_name, matched or "", job_id, stage="greeting_pending")
-            if "附件简历" in message:
+            self._upsert_candidate(contact_name, keyword, job_id, stage="greeting_pending")
+            if _is_resume_card(message):
+                if status is not None:
+                    continue
                 self.outreaches.create_unique(
                     action=OutreachAction(
                         kind="action",
                         command="agree-resume",
                         target=contact_name,
-                        job_keyword=matched or "",
+                        job_keyword=keyword,
                     ),
                 )
                 self.store.mark_candidate(job_id, contact_name, "agree_pending")
                 created += 1
+                continue
+            if _is_resume_file(message):
+                if status in RESUME_RECEIVED_STATUSES:
+                    continue
+                self._cancel_resume_requests(contact_name)
+                self.store.mark_candidate(job_id, contact_name, "resume_ready", source_file=message)
+                created += 1
+                continue
+            if status is not None:
                 continue
             self.outreaches.create_unique(
                 action=OutreachAction(
@@ -346,12 +427,23 @@ class AutomationEngine:
                     target=contact_name,
                     text=INBOUND_REPLY_TEXT,
                     request_resume=True,
-                    job_keyword=matched or "",
+                    job_keyword=keyword,
                 ),
             )
             self.store.mark_candidate(job_id, contact_name, "inbound_pending")
             created += 1
         return created
+
+    def _cancel_resume_requests(self, name: str) -> None:
+        """对方已发来简历时，作废该候选人尚未发送的求简历草稿，避免重复索要。"""
+        for record in self.outreaches.list_records(archived=False):
+            if record.get("status") != "pending":
+                continue
+            action = record.get("action", {})
+            if action.get("target") == name and action.get("request_resume"):
+                self.outreaches.update(
+                    record["id"], status="rejected", result="对方已发来附件简历，自动作废",
+                )
 
     def auto_accept_resumes(self) -> int:
         """自动执行「同意接收附件简历」草稿。
@@ -361,6 +453,8 @@ class AutomationEngine:
         """
         executed = 0
         for record in self.outreaches.list_records(archived=False):
+            if self.stopping:
+                break
             if record.get("status") != "pending":
                 continue
             action = record.get("action", {})
@@ -412,23 +506,34 @@ class AutomationEngine:
         return False
 
     def sync_resumes(self) -> int:
-        """下载已打招呼候选人的附件简历，成功则写入任务并推进候选人阶段。"""
+        """下载候选人的附件简历，成功则写入任务并推进候选人阶段。
+
+        覆盖两类候选人：已触达（outreached）的，以及对方已发来简历（resume_ready）的。
+        """
         downloaded = 0
         positions_by_job = {
             info["job_id"]: name for name, info in self.store.list_positions().items()
         }
-        # 旧流程：AutomationStore 中已触达（outreached）的候选人
-        for candidate in self.store.candidates_by_status("outreached"):
+        pending = [
+            *self.store.candidates_by_status("outreached"),
+            *self.store.candidates_by_status("resume_ready"),
+        ]
+        for candidate in pending:
+            if self.stopping:
+                break
             job_id = candidate["job_id"]
             name = candidate["name"]
-            if self._download_resume_to_job(name, job_id):
+            job_keyword = positions_by_job.get(job_id, "")
+            stored = self._download_resume_to_job(name, job_id)
+            if stored:
                 self.store.mark_candidate(job_id, name, "resume_downloaded")
-                self._set_candidate_stage(name, positions_by_job.get(job_id, ""), job_id, "resume_received")
+                self._set_candidate_stage(
+                    name, job_keyword, job_id, "resume_received", resume_file=stored,
+                )
                 downloaded += 1
                 continue
             failures = self.store.increment_download_failures(job_id, name)
             if failures >= RESUME_REQUEST_FAILURE_THRESHOLD:
-                job_keyword = positions_by_job.get(job_id, "")
                 self.outreaches.create_unique(
                     action=OutreachAction(
                         kind="action",
@@ -446,17 +551,22 @@ class AutomationEngine:
                 "SELECT * FROM candidate WHERE stage = 'greeted' AND job_id != ''"
             )
             for c in greeted:
-                if self._download_resume_to_job(c["name"], c["job_id"]):
-                    self._set_candidate_stage(c["name"], c["job_keyword"], c["job_id"], "resume_received")
+                if self.stopping:
+                    break
+                stored = self._download_resume_to_job(c["name"], c["job_id"])
+                if stored:
+                    self._set_candidate_stage(
+                        c["name"], c["job_keyword"], c["job_id"], "resume_received", resume_file=stored,
+                    )
                     downloaded += 1
         return downloaded
 
-    def _download_resume_to_job(self, name: str, job_id: str) -> bool:
-        """下载候选人附件简历并写入对应任务，成功返回 True。"""
+    def _download_resume_to_job(self, name: str, job_id: str) -> str | None:
+        """下载候选人附件简历并写入对应任务，成功返回写入的文件名。"""
         try:
             source = self.boss.download_resume(name)
         except BossCliError:
-            return False
+            return None
         try:
             job = self.repository.get(job_id)
             reserved, target = self.repository.reserve_upload(job_id, "resumes", source.name)
@@ -468,10 +578,10 @@ class AutomationEngine:
                 job_id, resume_files=files, resume_hashes=resume_hashes,
                 total=len(files), stage=f"已导入 {len(files)} 份附件简历",
             )
-            return True
+            return reserved
         except (FileNotFoundError, ValueError) as exc:
             logger.warning("写入候选人「%s」简历失败：%s", name, exc)
-            return False
+            return None
 
     def start_ready_jobs(self) -> int:
         """对已有简历、尚未运行的任务启动筛选。"""

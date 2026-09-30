@@ -10,7 +10,7 @@ import logging
 
 from ..llm import LLMError, OpenAICompatibleClient
 from ..pipeline import extract_document
-from ..rubric.models import WeightedRubric
+from ..rubric.models import CandidateScore, WeightedRubric
 from ..rubric.service import generate_rubric, score_candidate
 from .db import (
     GREETABLE_SCORES,
@@ -46,23 +46,21 @@ def _get_jd(candidate: dict, repository, boss) -> str:
 
 
 def _get_resume_text(candidate: dict, repository, settings) -> str:
-    """从任务目录读取已下载的附件简历并解析为文本。"""
+    """读取该候选人本人的附件简历并解析为文本。
+
+    简历尚未下载或无法解析出文本时抛错，由调用方记录原因并跳过该候选人，
+    避免用空文本或别人的简历得出评分。
+    """
     job_id = candidate.get("job_id") or ""
-    if not job_id:
-        return ""
-    try:
-        job = repository.get(job_id)
-    except FileNotFoundError:
-        return ""
-    resume_files = job.get("resume_files") or []
-    if not resume_files:
-        return ""
-    try:
-        path = repository.resume_path(job_id, resume_files[-1])
-        result = extract_document(path, settings, resume=True)
-        return (result.get("text") or "").strip()
-    except Exception:  # noqa: BLE001
-        return ""
+    resume_file = (candidate.get("resume_file") or "").strip()
+    if not job_id or not resume_file:
+        raise FileNotFoundError(f"候选人「{candidate.get('name') or ''}」尚无已下载的附件简历")
+    path = repository.resume_path(job_id, resume_file)
+    result = extract_document(path, settings, resume=True)
+    text = (result.get("text") or "").strip()
+    if not text:
+        raise ValueError(f"附件简历「{resume_file}」未解析出文本：{result.get('error') or '内容为空'}")
+    return text
 
 
 def score_candidates(store: RecruitmentStore, boss, repository, settings_store, candidate_ids=None) -> dict:
@@ -144,6 +142,15 @@ def _stage_from_grade(grade: str) -> str:
     return STAGE_REJECTED
 
 
+def _score_reason(result: CandidateScore) -> str:
+    """一句话结论与档位保持一致：命中否决项列否决项，D 档给主要风险，其余给核心亮点。"""
+    if result.veto_hits:
+        return "命中否决项：" + "、".join(result.veto_hits)
+    if result.grade == "D":
+        return result.risk or result.highlight
+    return result.highlight
+
+
 def auto_score_candidates(store, repository, settings_store, boss=None, candidate_ids=None) -> dict:
     """简历到手后自动评分：按岗位专属加权标准逐份打分，结果写入候选人。"""
     if candidate_ids:
@@ -182,7 +189,7 @@ def auto_score_candidates(store, repository, settings_store, boss=None, candidat
                     store.execute(
                         "UPDATE candidate SET pre_score = ?, pre_score_reason = ?, pre_scored_at = ?, "
                         "score_detail = ?, stage = ?, updated_at = ? WHERE id = ?",
-                        (result.grade, result.highlight, _now(), json.dumps(result.model_dump(), ensure_ascii=False), stage, _now(), c["id"]),
+                        (result.grade, _score_reason(result), _now(), json.dumps(result.model_dump(), ensure_ascii=False), stage, _now(), c["id"]),
                     )
                     scored += 1
                 except LLMError as exc:

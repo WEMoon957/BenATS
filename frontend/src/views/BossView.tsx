@@ -32,6 +32,11 @@ export interface BossViewProps {
   onToast: (message: string) => void;
 }
 
+interface BossPositions {
+  target_job: string;
+  positions: string[];
+}
+
 function kindLabel(action: OutreachAction): string {
   if (action.kind === "action" && action.command === "request-attachment-resume") {
     return t("outreachKindRequestResume");
@@ -71,6 +76,8 @@ export function BossView({ onToast }: BossViewProps) {
   const [running, setRunning] = useState(false);
   const [outreaches, setOutreaches] = useState<OutreachRecord[]>([]);
   const [candidates, setCandidates] = useState<{ stage: string }[]>([]);
+  const [targetJob, setTargetJob] = useState("");
+  const [positions, setPositions] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [approvingAll, setApprovingAll] = useState(false);
@@ -79,14 +86,17 @@ export function BossView({ onToast }: BossViewProps) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [status, list, cands] = await Promise.all([
+      const [status, list, cands, jobInfo] = await Promise.all([
         api<AutomationStatus>("/api/boss/automation/status"),
         api<{ outreaches: OutreachRecord[] }>("/api/boss/outreaches"),
         api<{ candidates: { stage: string }[] }>("/api/recruitment/candidates"),
+        api<BossPositions>("/api/boss/target-job"),
       ]);
       setRunning(status.running);
       setOutreaches(list.outreaches || []);
       setCandidates(cands.candidates || []);
+      setTargetJob(jobInfo.target_job || "");
+      setPositions(jobInfo.positions || []);
     } catch (error) {
       onToast((error as Error).message);
     } finally {
@@ -111,6 +121,24 @@ export function BossView({ onToast }: BossViewProps) {
   const runOnce = async () => {
     try {
       await api("/api/boss/automation/run", { method: "POST" });
+      await load();
+    } catch (error) {
+      onToast((error as Error).message);
+    }
+  };
+
+  const selectTargetJob = async (job: string) => {
+    try {
+      const result = await api<{ target_job: string }>("/api/boss/target-job", {
+        method: "POST",
+        body: JSON.stringify({ job }),
+      });
+      setTargetJob(result.target_job);
+      onToast(
+        result.target_job
+          ? t("bossTargetJobSaved", { job: result.target_job })
+          : t("bossTargetJobCleared"),
+      );
       await load();
     } catch (error) {
       onToast((error as Error).message);
@@ -156,6 +184,7 @@ export function BossView({ onToast }: BossViewProps) {
 
   const pending = outreaches.filter((item) => item.status === "pending");
   const processed = outreaches.filter((item) => item.status !== "pending");
+  const jobOptions = targetJob && !positions.includes(targetJob) ? [targetJob, ...positions] : positions;
 
   const stageCount = (stages: string[]) => candidates.filter((c) => stages.includes(c.stage)).length;
   const flow = [
@@ -188,10 +217,29 @@ export function BossView({ onToast }: BossViewProps) {
             {t("bossRefresh")}
           </Button>
         </div>
+        <div className="boss-target-job">
+          <label htmlFor="boss-target-job">{t("bossTargetJob")}</label>
+          <select
+            id="boss-target-job"
+            value={targetJob}
+            disabled={loading || jobOptions.length === 0}
+            onChange={(event) => void selectTargetJob(event.target.value)}
+          >
+            {!targetJob && <option value="">{t("bossTargetJobAll")}</option>}
+            {jobOptions.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+          <span className="boss-hint">
+            {jobOptions.length === 0 ? t("bossTargetJobEmpty") : t("bossTargetJobLead")}
+          </span>
+        </div>
       </div>
 
       <div className="boss-panel">
-        <div className="subsection-heading"><h3>触达方案 · 新媒体运营总监</h3></div>
+        <div className="subsection-heading"><h3>触达方案 · {targetJob || t("bossTargetJobAll")}</h3></div>
         <p className="boss-lead">系统自动完成「拉候选人 → 打招呼 → 求简历 → 下载评分」，你只需审核触达动作、看评分结果。</p>
         <div className="outreach-flow">
           {flow.map((step, i) => (

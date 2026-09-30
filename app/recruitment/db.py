@@ -85,6 +85,7 @@ CREATE TABLE IF NOT EXISTS candidate (
     pre_score_reason TEXT NOT NULL DEFAULT '',
     pre_scored_at TEXT,
     score_detail TEXT NOT NULL DEFAULT '',
+    resume_file TEXT NOT NULL DEFAULT '',
     call_score TEXT NOT NULL DEFAULT '',
     phone TEXT NOT NULL DEFAULT '',
     note TEXT NOT NULL DEFAULT '',
@@ -133,6 +134,10 @@ class RecruitmentStore:
             conn.executescript(_SCHEMA)
             try:
                 conn.execute("ALTER TABLE candidate ADD COLUMN score_detail TEXT NOT NULL DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("ALTER TABLE candidate ADD COLUMN resume_file TEXT NOT NULL DEFAULT ''")
             except sqlite3.OperationalError:
                 pass
             try:

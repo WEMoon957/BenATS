@@ -70,6 +70,8 @@ def execute_outreach(connector: BossCliConnector, action: OutreachAction) -> str
     """把一条触达动作翻译成 boss 命令并执行，返回执行结果文本。"""
     if action.kind == "greet":
         if action.job_keyword:
+            # 打招呼必须在推荐列表页完成，先读取该岗位推荐列表把页面切过去
+            connector.run("recommend", action.job_keyword)
             return connector.run("greet", action.target, "--job", action.job_keyword)
         return connector.run("greet", action.target)
 
