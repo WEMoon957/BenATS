@@ -2,6 +2,8 @@
 
 智联招聘自动化 CLI。基于 Puppeteer/CDP 驱动本机 Chrome，操作智联招聘 B 端，供 Talent Hub 以子进程方式调用。
 
+> 给 HR 同事的安装与使用说明见 [HR使用说明.md](./HR使用说明.md)（不需要技术背景）。
+
 ## 安装
 
 ```bash
