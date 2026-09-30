@@ -84,3 +84,36 @@ export async function runGreet(name: string): Promise<string> {
     ? `已对候选人「${name}」打招呼，并在招呼语弹框里点了发送。`
     : `已对候选人「${name}」打招呼。`;
 }
+
+/** 批量打招呼时两个人之间的等待区间，降低平台风控风险。 */
+const PERSON_GAP_MS = { min: 1500, max: 3000 } as const;
+
+/**
+ * 对多位候选人依次打招呼，返回汇总文本。
+ *
+ * 单个人失败不会中断整批；文本末尾附成功与失败数量。
+ */
+export async function runGreetMany(
+  names: string[],
+): Promise<{ text: string; failed: number }> {
+  const lines: string[] = [];
+  let failed = 0;
+
+  for (const [index, name] of names.entries()) {
+    if (index > 0) {
+      await sleepRandom(PERSON_GAP_MS);
+    }
+    try {
+      lines.push(await runGreet(name));
+    } catch (error) {
+      failed += 1;
+      const message = error instanceof Error ? error.message : String(error);
+      lines.push(`候选人「${name}」处理失败：${message}`);
+    }
+  }
+
+  lines.push(
+    `批量打招呼结束：共 ${names.length} 人，成功 ${names.length - failed}，失败 ${failed}。`,
+  );
+  return { text: lines.join('\n'), failed };
+}

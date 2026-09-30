@@ -162,3 +162,38 @@ export async function runRequest(
 
   return [`候选人「${name}」处理完成：`, ...done.map((item) => `  - ${item}`)].join('\n');
 }
+
+/** 批量索要时两个人之间的等待区间，降低平台风控风险。 */
+const PERSON_GAP_MS = { min: 1500, max: 3000 } as const;
+
+/**
+ * 对多位候选人依次执行索要操作，返回汇总文本。
+ *
+ * 单个人失败不会中断整批；文本末尾附成功与失败数量。
+ */
+export async function runRequestMany(
+  names: string[],
+  kinds: RequestKind[],
+  message = '',
+): Promise<{ text: string; failed: number }> {
+  const sections: string[] = [];
+  let failed = 0;
+
+  for (const [index, name] of names.entries()) {
+    if (index > 0) {
+      await sleepRandom(PERSON_GAP_MS);
+    }
+    try {
+      sections.push(await runRequest(name, kinds, message));
+    } catch (error) {
+      failed += 1;
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      sections.push(`候选人「${name}」处理失败：${errorMessage}`);
+    }
+  }
+
+  sections.push(
+    `批量索要结束：共 ${names.length} 人，成功 ${names.length - failed}，失败 ${failed}。`,
+  );
+  return { text: sections.join('\n'), failed };
+}
