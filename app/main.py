@@ -34,8 +34,15 @@ from .repository import JobRepository
 from .runtime.phone_screening import CallProcessor, render_call_summary_markdown
 from .connectors.boss_cli import BossCliConnector, BossCliError
 from .connectors.imports import import_position
-from .connectors.outreach import OutreachAction, OutreachStore, execute_outreach
+from .connectors.outreach import (
+    BOSS_PLATFORM,
+    ZHAOPIN_PLATFORM,
+    OutreachAction,
+    OutreachStore,
+    execute_outreach,
+)
 from .connectors.automation import AutomationEngine, AutomationStore, _is_target_job
+from .connectors.zhaopin_cli import ZhaopinCliConnector, ZhaopinCliError
 from .attendance.db import get_store as get_attendance_store
 from .attendance.routes import register_routes as register_attendance_routes
 from .attendance.sync import FeishuSyncEngine
@@ -401,7 +408,10 @@ def create_app(data_dir: Path | None = None, app_token: str | None = None) -> Fa
     outreaches = OutreachStore(root)
     automation_store = AutomationStore(root)
     recruitment_store = get_recruitment_store()
-    automation = AutomationEngine(repository, engine, boss, outreaches, automation_store, call_repository, recruitment_store, settings_store)
+    automation = AutomationEngine(
+        repository, engine, boss, outreaches, automation_store, call_repository,
+        recruitment_store, settings_store, ZhaopinCliConnector(),
+    )
     token = app_token or secrets.token_urlsafe(32)
     # React 前端构建产物目录（Vite 构建，需先 npm run build）
     static_dir = ROOT / "frontend" / "dist"
@@ -1112,9 +1122,10 @@ def create_app(data_dir: Path | None = None, app_token: str | None = None) -> Fa
             if record.get("status") != "pending":
                 raise HTTPException(status_code=409, detail="只有待审核的触达可以批准。")
             action = OutreachAction(**record["action"])
+            connector = automation.zhaopin if action.platform == ZHAOPIN_PLATFORM else boss
             try:
-                result = execute_outreach(boss, action)
-            except BossCliError as exc:
+                result = execute_outreach(connector, action)
+            except (BossCliError, ZhaopinCliError) as exc:
                 return outreaches.update(outreach_id, status="failed", error=str(exc))
             return outreaches.update(outreach_id, status="sent", result=result, error="")
         return await run_in_threadpool(_run)
@@ -1134,10 +1145,12 @@ def create_app(data_dir: Path | None = None, app_token: str | None = None) -> Fa
 
         限定目标岗位有两个原因：一是避免点到「一键发送」时把其它岗位的历史草稿一并发出，
         二是历史草稿可能上百条、每条要几十秒，整批会长时间跑不完。
+        BOSS 与智联各自按自己的目标岗位筛选，互不影响。
         """
 
         def _run():
             target = automation.target_job()
+            zhaopin_target = automation.zhaopin_target_job()
             sent = 0
             failed = 0
             skipped = 0
@@ -1145,12 +1158,19 @@ def create_app(data_dir: Path | None = None, app_token: str | None = None) -> Fa
                 if record.get("status") != "pending":
                     continue
                 action = OutreachAction(**record["action"])
-                if not _is_target_job(action.job_keyword, target):
-                    skipped += 1
-                    continue
+                if action.platform == ZHAOPIN_PLATFORM:
+                    if not _is_target_job(action.job_keyword, zhaopin_target):
+                        skipped += 1
+                        continue
+                    connector = automation.zhaopin
+                else:
+                    if not _is_target_job(action.job_keyword, target):
+                        skipped += 1
+                        continue
+                    connector = boss
                 try:
-                    result = execute_outreach(boss, action)
-                except BossCliError as exc:
+                    result = execute_outreach(connector, action)
+                except (BossCliError, ZhaopinCliError) as exc:
                     outreaches.update(record["id"], status="failed", error=str(exc))
                     failed += 1
                     continue
@@ -1169,7 +1189,12 @@ def create_app(data_dir: Path | None = None, app_token: str | None = None) -> Fa
         """目标岗位选择器数据：读取本地缓存，不调用 boss-cli，避免浏览器忙时下拉框取不到值。"""
         return {
             "target_job": automation.target_job(),
-            "positions": automation_store.list_available() or sorted(automation_store.list_positions()),
+            "positions": automation_store.list_available()
+            or sorted(
+                name
+                for name, info in automation_store.list_positions().items()
+                if info.get("platform", BOSS_PLATFORM) == BOSS_PLATFORM
+            ),
         }
 
     @app.post("/api/boss/target-job")
@@ -1178,6 +1203,21 @@ def create_app(data_dir: Path | None = None, app_token: str | None = None) -> Fa
         settings.boss_target_job = payload.job.strip()
         saved = settings_store.save(settings)
         return {"target_job": saved.effective_boss_target_job}
+
+    @app.get("/api/zhaopin/target-job")
+    async def zhaopin_target_job():
+        """智联目标岗位选择器数据：读取本地缓存，不调用 zhaopin-cli。"""
+        return {
+            "target_job": automation.zhaopin_target_job(),
+            "positions": automation_store.list_available(ZHAOPIN_PLATFORM),
+        }
+
+    @app.post("/api/zhaopin/target-job")
+    async def set_zhaopin_target_job(payload: BossTargetJobInput):
+        settings = settings_store.load()
+        settings.zhaopin_target_job = payload.job.strip()
+        saved = settings_store.save(settings)
+        return {"target_job": saved.effective_zhaopin_target_job}
 
     @app.post("/api/boss/automation/run")
     async def automation_run():

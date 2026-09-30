@@ -7,7 +7,12 @@ import pytest
 from app.config import AppSettings, SettingsStore
 from app.connectors.automation import AutomationEngine, AutomationStore
 from app.connectors.boss_cli import BossCliError
-from app.connectors.outreach import OutreachStore
+from app.connectors.outreach import (
+    ZHAOPIN_PLATFORM,
+    OutreachAction,
+    OutreachStore,
+    execute_outreach,
+)
 from app.recruitment import services
 from app.recruitment.db import RecruitmentStore
 from app.repository import JobRepository
@@ -44,6 +49,25 @@ class FakeBoss:
         raise BossCliError("暂无附件")
 
 
+class FakeZhaopin:
+    """假智联连接器：只提供自动化流程用到的读取与命令执行能力。"""
+
+    def __init__(self, positions, candidates):
+        self.positions = positions
+        self.candidates = candidates
+        self.calls = []
+
+    def run(self, *args, **kwargs):
+        self.calls.append(args)
+        return "ok"
+
+    def list_positions(self, keyword=None):
+        return self.positions
+
+    def list_recommend(self, keyword=None):
+        return self.candidates.get(keyword, [])
+
+
 class FakeEngine:
     def __init__(self):
         self.started = []
@@ -62,16 +86,27 @@ class FakeCallRepository:
         return {"id": "call-id"}
 
 
-def build(tmp_path, boss, engine, call_repository=None, target_job=""):
+def build(
+    tmp_path,
+    boss,
+    engine,
+    call_repository=None,
+    target_job="",
+    zhaopin=None,
+    zhaopin_target_job="",
+):
     repository = JobRepository(tmp_path)
     outreaches = OutreachStore(tmp_path)
     store = AutomationStore(tmp_path)
     settings_store = None
-    if target_job:
+    if target_job or zhaopin_target_job:
         settings_store = SettingsStore(tmp_path)
-        settings_store.save(AppSettings(boss_target_job=target_job))
+        settings_store.save(
+            AppSettings(boss_target_job=target_job, zhaopin_target_job=zhaopin_target_job)
+        )
     automation = AutomationEngine(
-        repository, engine, boss, outreaches, store, call_repository, None, settings_store
+        repository, engine, boss, outreaches, store,
+        call_repository, None, settings_store, zhaopin,
     )
     return repository, outreaches, store, automation
 
@@ -646,3 +681,56 @@ def test_compute_score_rejects_unmatched_item_ids():
         )
     with pytest.raises(ValueError, match="缺少逐项得分"):
         compute_score(CandidateScore(candidate_name="甲", item_scores=[]), rubric)
+
+
+def test_zhaopin_sync_registers_positions_and_drafts_greetings(tmp_path):
+    """智联职位与推荐候选人进入流程：登记岗位、只给目标岗位生成打招呼草稿，且标记为智联平台。"""
+    boss = FakeBoss([], {}, {}, {})
+    zhaopin = FakeZhaopin(
+        [{"name": "服务员"}, {"name": "店长"}],
+        {"服务员": [{"name": "高女士"}, {"name": "龙女士"}]},
+    )
+    _, outreaches, store, automation = build(
+        tmp_path, boss, FakeEngine(), zhaopin=zhaopin, zhaopin_target_job="服务员"
+    )
+
+    summary = automation.run_once()
+    assert summary["zhaopin_positions_created"] == 2
+    assert summary["zhaopin_outreaches_created"] == 2
+
+    drafts = outreaches.list_records(archived=False)
+    assert sorted(record["action"]["target"] for record in drafts) == ["高女士", "龙女士"]
+    assert all(record["action"]["platform"] == ZHAOPIN_PLATFORM for record in drafts)
+    assert all(record["action"]["job_keyword"] == "服务员" for record in drafts)
+    assert store.list_available(ZHAOPIN_PLATFORM) == ["店长", "服务员"]
+
+    # 再跑一轮不重复登记岗位，也不重复生成草稿
+    again = automation.run_once()
+    assert again["zhaopin_positions_created"] == 0
+    assert again["zhaopin_outreaches_created"] == 0
+    assert len(outreaches.list_records(archived=False)) == 2
+
+
+def test_zhaopin_greet_switches_job_then_greets():
+    """智联打招呼先切到目标岗位的推荐页，再按姓名打招呼。"""
+    connector = FakeZhaopin([], {})
+    action = OutreachAction(
+        kind="greet", target="高女士", job_keyword="服务员", platform=ZHAOPIN_PLATFORM
+    )
+
+    assert execute_outreach(connector, action) == "ok"
+    assert connector.calls == [("recommend", "服务员"), ("greet", "高女士")]
+
+
+def test_zhaopin_resume_request_uses_request_command():
+    """智联索要附件简历由 request 命令自行打开聊天框完成。"""
+    connector = FakeZhaopin([], {})
+    action = OutreachAction(
+        kind="action",
+        command="request-attachment-resume",
+        target="高女士",
+        platform=ZHAOPIN_PLATFORM,
+    )
+
+    assert execute_outreach(connector, action) == "ok"
+    assert connector.calls == [("request", "高女士", "resume")]

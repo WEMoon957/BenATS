@@ -15,7 +15,14 @@ import threading
 from pathlib import Path
 
 from .boss_cli import BossCliConnector, BossCliError
-from .outreach import OutreachAction, OutreachStore, execute_outreach
+from .outreach import (
+    BOSS_PLATFORM,
+    ZHAOPIN_PLATFORM,
+    OutreachAction,
+    OutreachStore,
+    execute_outreach,
+)
+from .zhaopin_cli import ZhaopinCliConnector, ZhaopinCliError
 from ..config import AppSettings
 from ..repository import JobRepository
 from ..pipeline import EvaluationEngine
@@ -77,6 +84,8 @@ class AutomationStore:
             self._data = {}
         self._data.setdefault("positions", {})
         self._data.setdefault("candidates", {})
+        if not isinstance(self._data.get("available_positions"), dict):
+            self._data["available_positions"] = {}
 
     def _save(self) -> None:
         tmp = self._path.with_suffix(".tmp")
@@ -86,9 +95,13 @@ class AutomationStore:
     def has_position(self, name: str) -> bool:
         return name in self._data["positions"]
 
-    def mark_position(self, name: str, job_id: str) -> None:
+    def mark_position(self, name: str, job_id: str, platform: str = BOSS_PLATFORM) -> None:
         with self._lock:
-            self._data["positions"][name] = {"job_id": job_id, "s_call_synced": False}
+            self._data["positions"][name] = {
+                "job_id": job_id,
+                "platform": platform,
+                "s_call_synced": False,
+            }
             self._save()
 
     def position_s_calls_synced(self, name: str) -> bool:
@@ -103,14 +116,16 @@ class AutomationStore:
     def list_positions(self) -> dict:
         return dict(self._data["positions"])
 
-    def remember_available(self, names: list[str]) -> None:
-        """记录最近一次从 BOSS 拉到的全部职位名，供界面选择目标岗位。"""
+    def remember_available(self, names: list[str], platform: str = BOSS_PLATFORM) -> None:
+        """记录最近一次拉到的全部职位名（按平台分存），供界面选择目标岗位。"""
         with self._lock:
-            self._data["available_positions"] = sorted({name for name in names if name})
+            by_platform = self._data["available_positions"]
+            by_platform[platform] = sorted({name for name in names if name})
             self._save()
 
-    def list_available(self) -> list[str]:
-        return list(self._data.get("available_positions", []))
+    def list_available(self, platform: str = BOSS_PLATFORM) -> list[str]:
+        """返回指定平台最近一次拉到的职位名。"""
+        return list(self._data["available_positions"].get(platform, []))
 
     @staticmethod
     def _candidate_key(job_id: str, name: str) -> str:
@@ -170,12 +185,14 @@ class AutomationEngine:
         call_repository=None,
         recruitment_store=None,
         settings_store=None,
+        zhaopin: ZhaopinCliConnector | None = None,
         *,
         interval_seconds: int = 300,
     ) -> None:
         self.repository = repository
         self.engine = engine
         self.boss = boss
+        self.zhaopin = zhaopin
         self.outreaches = outreaches
         self.store = store
         self.call_repository = call_repository
@@ -207,10 +224,22 @@ class AutomationEngine:
         return bool(self._thread and self._thread.is_alive())
 
     def target_job(self) -> str:
-        """当前生效的目标岗位：每轮实时读取设置项，未配置时回退到环境变量与默认岗位。"""
+        """当前生效的 BOSS 目标岗位：每轮实时读取设置项，未配置时回退到环境变量与默认岗位。"""
         if self.settings_store is None:
             return AppSettings().effective_boss_target_job
         return self.settings_store.load().effective_boss_target_job
+
+    def zhaopin_target_job(self) -> str:
+        """当前生效的智联目标岗位：每轮实时读取设置项，未配置时回退到环境变量。"""
+        if self.settings_store is None:
+            return AppSettings().effective_zhaopin_target_job
+        return self.settings_store.load().effective_zhaopin_target_job
+
+    def _connector_for(self, platform: str):
+        """按平台返回对应的 CLI 连接器；智联未配置时返回 None。"""
+        if platform == ZHAOPIN_PLATFORM:
+            return self.zhaopin
+        return self.boss
 
     def _loop(self) -> None:
         while not self._stop.is_set():
@@ -228,6 +257,8 @@ class AutomationEngine:
             summary = {
                 "positions_created": self.sync_positions(),
                 "outreaches_created": self.sync_candidates(),
+                "zhaopin_positions_created": self.sync_zhaopin_positions(),
+                "zhaopin_outreaches_created": self.sync_zhaopin_candidates(),
                 "inbound_created": self.sync_inbound(),
                 "resume_requests_accepted": self.auto_accept_resumes(),
                 "outreaches_reconciled": self.sync_outreach_results(),
@@ -318,7 +349,81 @@ class AutomationEngine:
                 created += 1
         return created
 
-    def _upsert_candidate(self, name: str, job_keyword: str, job_id: str, stage: str = "discovered") -> None:
+    def sync_zhaopin_positions(self) -> int:
+        """登记智联职位列表里的岗位。
+
+        智联当前没有 JD 命令，因此只记录岗位名与平台归属；
+        候选人与草稿以岗位名为关键字关联，不创建 Talent Hub 任务。
+        """
+        if self.zhaopin is None:
+            return 0
+        try:
+            positions = self.zhaopin.list_positions()
+        except ZhaopinCliError as exc:
+            logger.warning("拉取智联职位失败：%s", exc)
+            return 0
+        names = [item["name"] for item in positions if item.get("name")]
+        self.store.remember_available(names, ZHAOPIN_PLATFORM)
+        created = 0
+        for name in names:
+            if self.stopping:
+                break
+            if self.store.has_position(name):
+                continue
+            # 智联没有 JD 任务，用一个稳定且可区分平台的编号，供候选人状态做键
+            self.store.mark_position(name, f"{ZHAOPIN_PLATFORM}:{name}", ZHAOPIN_PLATFORM)
+            created += 1
+        return created
+
+    def sync_zhaopin_candidates(self) -> int:
+        """拉取智联目标岗位的推荐候选人，写入候选人库并生成打招呼草稿（待 HR 审核）。"""
+        if self.zhaopin is None:
+            return 0
+        created = 0
+        target = self.zhaopin_target_job()
+        for name, info in self.store.list_positions().items():
+            if self.stopping:
+                break
+            if info.get("platform") != ZHAOPIN_PLATFORM:
+                continue
+            if not _is_target_job(name, target):
+                continue
+            job_id = info.get("job_id", "")
+            try:
+                candidates = self.zhaopin.list_recommend(name)
+            except ZhaopinCliError as exc:
+                logger.warning("拉取智联职位「%s」候选人失败：%s", name, exc)
+                continue
+            for candidate in candidates:
+                candidate_name = candidate["name"]
+                if not candidate_name:
+                    continue
+                status = self.store.candidate_status(job_id, candidate_name)
+                if status is not None and status != "discovered":
+                    continue
+                self._upsert_candidate(
+                    candidate_name, name, job_id, platform=ZHAOPIN_PLATFORM
+                )
+                self.outreaches.create_unique(
+                    action=OutreachAction(
+                        kind="greet",
+                        target=candidate_name,
+                        job_keyword=name,
+                        platform=ZHAOPIN_PLATFORM,
+                    ),
+                )
+                self.store.mark_candidate(job_id, candidate_name, "outreach_pending")
+                created += 1
+        return created
+
+    def _upsert_candidate(
+        self,
+        name: str,
+        job_keyword: str,
+        job_id: str,
+        stage: str = "discovered",
+        platform: str = BOSS_PLATFORM,
+    ) -> None:
         """把候选人写入候选人库（同岗位同名去重，已存在则跳过），无 recruitment_store 时跳过。"""
         if self.recruitment_store is None:
             return
@@ -331,12 +436,18 @@ class AutomationEngine:
 
         self.recruitment_store.execute(
             "INSERT INTO candidate (name, job_keyword, job_id, source, stage, created_at, updated_at) "
-            "VALUES (?, ?, ?, 'boss', ?, ?, ?)",
-            (name, job_keyword, job_id, stage, _now(), _now()),
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (name, job_keyword, job_id, platform, stage, _now(), _now()),
         )
 
     def _set_candidate_stage(
-        self, name: str, job_keyword: str, job_id: str, stage: str, resume_file: str | None = None
+        self,
+        name: str,
+        job_keyword: str,
+        job_id: str,
+        stage: str,
+        resume_file: str | None = None,
+        platform: str = BOSS_PLATFORM,
     ) -> None:
         """把候选人阶段推进到指定值（不存在则新增），可同时登记附件简历文件名。"""
         if self.recruitment_store is None:
@@ -361,8 +472,8 @@ class AutomationEngine:
         else:
             self.recruitment_store.execute(
                 "INSERT INTO candidate (name, job_keyword, job_id, source, stage, resume_file, created_at, updated_at) "
-                "VALUES (?, ?, ?, 'boss', ?, ?, ?, ?)",
-                (name, job_keyword, job_id, stage, resume_file or "", now, now),
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (name, job_keyword, job_id, platform, stage, resume_file or "", now, now),
             )
 
     def sync_inbound(self) -> int:
@@ -460,9 +571,12 @@ class AutomationEngine:
             action = record.get("action", {})
             if action.get("kind") != "action" or action.get("command") != "agree-resume":
                 continue
+            connector = self._connector_for(action.get("platform", BOSS_PLATFORM))
+            if connector is None:
+                continue
             try:
-                result = execute_outreach(self.boss, OutreachAction(**action))
-            except BossCliError as exc:
+                result = execute_outreach(connector, OutreachAction(**action))
+            except (BossCliError, ZhaopinCliError) as exc:
                 self.outreaches.update(record["id"], status="failed", error=str(exc))
             else:
                 self.outreaches.update(record["id"], status="sent", result=result, error="")
@@ -486,7 +600,10 @@ class AutomationEngine:
             if not self._should_reconcile(action, self.store.candidate_status(job_id, target)):
                 continue
             self.store.mark_candidate(job_id, target, "outreached")
-            self._set_candidate_stage(target, job_keyword, job_id, "greeted")
+            self._set_candidate_stage(
+                target, job_keyword, job_id, "greeted",
+                platform=info.get("platform", BOSS_PLATFORM),
+            )
             reconciled += 1
         return reconciled
 
@@ -511,8 +628,12 @@ class AutomationEngine:
         覆盖两类候选人：已触达（outreached）的，以及对方已发来简历（resume_ready）的。
         """
         downloaded = 0
+        positions = self.store.list_positions()
         positions_by_job = {
-            info["job_id"]: name for name, info in self.store.list_positions().items()
+            info["job_id"]: name for name, info in positions.items() if info.get("job_id")
+        }
+        platforms_by_job = {
+            info["job_id"]: info.get("platform", BOSS_PLATFORM) for info in positions.values()
         }
         pending = [
             *self.store.candidates_by_status("outreached"),
@@ -524,6 +645,19 @@ class AutomationEngine:
             job_id = candidate["job_id"]
             name = candidate["name"]
             job_keyword = positions_by_job.get(job_id, "")
+            if platforms_by_job.get(job_id) == ZHAOPIN_PLATFORM:
+                # 智联没有下载附件简历的命令，直接生成一条「索要附件简历」草稿交给 HR 审核
+                self.outreaches.create_unique(
+                    action=OutreachAction(
+                        kind="action",
+                        command="request-attachment-resume",
+                        target=name,
+                        job_keyword=job_keyword,
+                        platform=ZHAOPIN_PLATFORM,
+                    ),
+                )
+                self.store.mark_candidate(job_id, name, "resume_requested")
+                continue
             stored = self._download_resume_to_job(name, job_id)
             if stored:
                 self.store.mark_candidate(job_id, name, "resume_downloaded")
@@ -553,6 +687,8 @@ class AutomationEngine:
             for c in greeted:
                 if self.stopping:
                     break
+                if platforms_by_job.get(c["job_id"]) == ZHAOPIN_PLATFORM:
+                    continue
                 stored = self._download_resume_to_job(c["name"], c["job_id"])
                 if stored:
                     self._set_candidate_stage(
@@ -587,10 +723,12 @@ class AutomationEngine:
         """对已有简历、尚未运行的任务启动筛选。"""
         started = 0
         for info in self.store.list_positions().values():
-            job_id = info["job_id"]
+            job_id = info.get("job_id", "")
+            if not job_id:
+                continue
             try:
                 job = self.repository.get(job_id)
-            except FileNotFoundError:
+            except (FileNotFoundError, ValueError):
                 continue
             if job.get("status") in {"queued", "running"}:
                 continue
@@ -613,10 +751,12 @@ class AutomationEngine:
         for name, info in self.store.list_positions().items():
             if self.store.position_s_calls_synced(name):
                 continue
-            job_id = info["job_id"]
+            job_id = info.get("job_id", "")
+            if not job_id:
+                continue
             try:
                 job = self.repository.get(job_id)
-            except FileNotFoundError:
+            except (FileNotFoundError, ValueError):
                 continue
             if job.get("status") != "completed":
                 continue

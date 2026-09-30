@@ -78,6 +78,8 @@ export function BossView({ onToast }: BossViewProps) {
   const [candidates, setCandidates] = useState<{ stage: string }[]>([]);
   const [targetJob, setTargetJob] = useState("");
   const [positions, setPositions] = useState<string[]>([]);
+  const [zhaopinTargetJob, setZhaopinTargetJob] = useState("");
+  const [zhaopinPositions, setZhaopinPositions] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [approvingAll, setApprovingAll] = useState(false);
@@ -86,17 +88,20 @@ export function BossView({ onToast }: BossViewProps) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [status, list, cands, jobInfo] = await Promise.all([
+      const [status, list, cands, jobInfo, zhaopinJobInfo] = await Promise.all([
         api<AutomationStatus>("/api/boss/automation/status"),
         api<{ outreaches: OutreachRecord[] }>("/api/boss/outreaches"),
         api<{ candidates: { stage: string }[] }>("/api/recruitment/candidates"),
         api<BossPositions>("/api/boss/target-job"),
+        api<BossPositions>("/api/zhaopin/target-job"),
       ]);
       setRunning(status.running);
       setOutreaches(list.outreaches || []);
       setCandidates(cands.candidates || []);
       setTargetJob(jobInfo.target_job || "");
       setPositions(jobInfo.positions || []);
+      setZhaopinTargetJob(zhaopinJobInfo.target_job || "");
+      setZhaopinPositions(zhaopinJobInfo.positions || []);
     } catch (error) {
       onToast((error as Error).message);
     } finally {
@@ -138,6 +143,24 @@ export function BossView({ onToast }: BossViewProps) {
         result.target_job
           ? t("bossTargetJobSaved", { job: result.target_job })
           : t("bossTargetJobCleared"),
+      );
+      await load();
+    } catch (error) {
+      onToast((error as Error).message);
+    }
+  };
+
+  const selectZhaopinTargetJob = async (job: string) => {
+    try {
+      const result = await api<{ target_job: string }>("/api/zhaopin/target-job", {
+        method: "POST",
+        body: JSON.stringify({ job }),
+      });
+      setZhaopinTargetJob(result.target_job);
+      onToast(
+        result.target_job
+          ? t("zhaopinTargetJobSaved", { job: result.target_job })
+          : t("zhaopinTargetJobCleared"),
       );
       await load();
     } catch (error) {
@@ -234,6 +257,25 @@ export function BossView({ onToast }: BossViewProps) {
           </select>
           <span className="boss-hint">
             {jobOptions.length === 0 ? t("bossTargetJobEmpty") : t("bossTargetJobLead")}
+          </span>
+        </div>
+        <div className="boss-target-job">
+          <label htmlFor="zhaopin-target-job">{t("zhaopinTargetJob")}</label>
+          <select
+            id="zhaopin-target-job"
+            value={zhaopinTargetJob}
+            disabled={loading || zhaopinPositions.length === 0}
+            onChange={(event) => void selectZhaopinTargetJob(event.target.value)}
+          >
+            {!zhaopinTargetJob && <option value="">{t("bossTargetJobAll")}</option>}
+            {zhaopinPositions.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+          <span className="boss-hint">
+            {zhaopinPositions.length === 0 ? t("zhaopinTargetJobEmpty") : t("zhaopinTargetJobLead")}
           </span>
         </div>
       </div>

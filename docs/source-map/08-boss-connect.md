@@ -1,6 +1,6 @@
 # 招聘接入链路
 
-> BOSS 直聘职位与简历导入、触达审核状态机、自动化引擎轮次和去重状态。
+> BOSS 直聘与智联招聘的职位导入、触达审核状态机、自动化引擎轮次和去重状态。
 >
 > 返回 [SOURCE_MAP.md](../SOURCE_MAP.md) 选择其他主题。
 
@@ -13,28 +13,38 @@ boss-cli（独立部署，子进程调用）
   ├─ recommend [关键词] ───── 职位推荐候选人；打招呼前必须先切到该页
   ├─ list / list --unread ─── 已沟通候选人 / 对方主动发来的消息
   └─ download-resume <姓名> ─ 附件简历本地路径
+
+zhaopin-cli（独立部署，子进程调用）
+  ├─ positions ────────────── 在招职位列表（没有 JD 命令）
+  ├─ recommend [关键词] ───── 职位推荐候选人；打招呼前必须先切到该页
+  ├─ greet <姓名> ─────────── 打招呼
+  └─ request <姓名> resume ── 打开聊天框索要附件简历
         │
         ▼
 AutomationEngine.run_once()（默认每 300 秒一轮，daemon 线程）
-  1. sync_positions()          新职位 → JobRepository.create() + 写入 JD；同时记录全部职位名供界面选择
-  2. sync_candidates()         新候选人 → 写入候选人库 + OutreachStore.create(greet) 草稿
-  3. sync_inbound()            未读消息（限目标岗位）→ 按类型分流：简历卡片「同意接收」、对方已发简历登记待下载、其他生成「回复+求简历」
-  4. auto_accept_resumes()     自动执行「同意接收」草稿（非对外触达，无需 HR 审核）
-  5. sync_outreach_results()   已发送触达 → 回写候选人状态为 outreached
-  6. sync_resumes()            outreached / resume_ready 候选人 → 下载附件简历写入任务，并登记到候选人本人
-  7. sync_scoring()            已收简历候选人 → 岗位专属标准自动评分
-  8. start_ready_jobs()        draft/waiting 且材料齐备的任务 → EvaluationEngine.start()
-  9. sync_s_calls()            已完成的筛选任务 → S 级名单电话确认任务
+  1. sync_positions()             BOSS 新职位 → JobRepository.create() + 写入 JD；同时记录职位名供界面选择
+  2. sync_candidates()            BOSS 新候选人 → 写入候选人库 + OutreachStore.create(greet) 草稿
+  3. sync_zhaopin_positions()     智联职位 → 登记岗位（没有 JD 命令，不创建 Talent Hub 任务）
+  4. sync_zhaopin_candidates()    智联目标岗位新候选人 → 写入候选人库 + greet 草稿
+  5. sync_inbound()               未读消息（限目标岗位）→ 按类型分流：简历卡片「同意接收」、对方已发简历登记待下载、其他生成「回复+求简历」
+  6. auto_accept_resumes()        自动执行「同意接收」草稿（非对外触达，无需 HR 审核）
+  7. sync_outreach_results()      已发送触达 → 回写候选人状态为 outreached
+  8. sync_resumes()               BOSS 的 outreached / resume_ready 候选人 → 下载附件简历写入任务；智联候选人直接生成「索要附件简历」草稿
+  9. sync_scoring()               已收简历候选人 → 岗位专属标准自动评分
+  10. start_ready_jobs()          draft/waiting 且材料齐备的任务 → EvaluationEngine.start()
+  11. sync_s_calls()              已完成的筛选任务 → S 级名单电话确认任务
         │
         ▼
 OutreachStore（outreaches/<id>/outreach.json，pending → sent / failed / rejected）
   ├─ 界面审核：批准发送 / 否决 / 一键发送
-  └─ execute_outreach() 把动作翻译成 boss 命令并执行
+  └─ execute_outreach() 按 action.platform 把动作翻译成对应平台的命令并执行
 ```
 
 引擎只由 `main()` 启动路径拉起（`app.state.automation.start()`），`create_app()` 只装配不启动。
 
 目标岗位由设置项 `boss_target_job` 指定，未配置时回退环境变量 `BENATS_TARGET_JOB`；两者都为空表示不限定岗位。该值每轮实时读取，用于筛职位、推荐候选人、往来消息与推荐页打招呼。
+
+智联的目标岗位由设置项 `zhaopin_target_job` 指定，未配置时回退环境变量 `BENATS_ZHAOPIN_TARGET_JOB`；用于智联职位的推荐候选人与打招呼草稿。两个平台各按自己的目标岗位筛选，互不影响。
 
 ## 20.1 触达动作与状态机
 
@@ -42,12 +52,13 @@ OutreachStore（outreaches/<id>/outreach.json，pending → sent / failed / reje
 
 | 字段 | 说明 |
 | --- | --- |
-| `kind` | `greet` 打招呼、`send` 发消息、`action` 聊天页操作 |
+| `platform` | 动作归属的平台：`boss` 或 `zhaopin`，决定翻译成哪套命令 |
+| `kind` | `greet` 打招呼、`send` 发消息、`action` 平台操作 |
 | `target` | 候选人姓名 |
 | `text` | 消息正文（`send`） |
 | `request_resume` | `send` 时是否附带索要简历 |
 | `job_keyword` | 关联职位名，用于回写候选人状态 |
-| `command` | `action` 的具体命令：`agree-resume`、`request-attachment-resume`、`remark`、`not-fit` |
+| `command` | 平台操作的具体命令：`agree-resume`、`request-attachment-resume`、`remark`、`not-fit` |
 | `remark` | `remark` 命令的备注内容 |
 
 草稿状态机为 `pending → sent / failed / rejected`，只有 `pending` 可批准或否决，其他状态由端点返回 409。`execute_outreach()` 失败时把 `BossCliError` 文本写入记录的 `error`，状态置 `failed`，不影响其他草稿，也不改变筛选或电话任务状态。
@@ -84,5 +95,6 @@ outreached       → resume_downloaded   附件简历下载并写入任务成功
 - 修改轮询间隔或引擎启停方式：同步 `AutomationEngine` 构造参数、`main()` 启动路径、`/api/boss/automation/*` 端点与界面状态文案。
 - 修改去重键：同步 `positions` / `candidates` 的键格式，并检查已持久化的 `automation.json` 兼容性。
 - 修改目标岗位的取值方式：同步 `AppSettings.boss_target_job`、`GET /api/boss/target-job`（选择器数据，读本地缓存）、`POST /api/boss/target-job`、`BossView` 的目标岗位选择器，以及 `_is_target_job()` 的各调用点。注意 `GET /api/boss/positions` 是另一个端点（调 boss-cli 拉实时职位表，供 `RecruitmentWizard` 导入 JD 用），两者不可合并为同一路径。
+- 新增招聘平台：实现该平台的连接器与 `execute_outreach()` 分支，在 `AutomationEngine` 注入连接器并补一轮 `sync_<平台>_positions()` / `sync_<平台>_candidates()`，再同步对应设置项、目标岗位端点和动作表里的 `platform` 取值。
 - 修改候选人附件简历的存放位置或命名：同步 `sync_resumes()` 写入的 `candidate.resume_file` 与 `services._get_resume_text()` 的读取，否则自动打分可能读到同任务下别人的简历。
 - 新增对外发送动作时，必须保持「先生成草稿、HR 审核后才执行」的边界，不得直接发送。

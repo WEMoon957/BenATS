@@ -16,6 +16,7 @@ ENV_API_KEY = "TALENT_HUB_API_KEY"
 ENV_ASR_API_KEY = "TALENT_HUB_ASR_API_KEY"
 ENV_FEISHU_SIGN_SECRET = "TALENT_HUB_FEISHU_SIGN_SECRET"
 ENV_BOSS_TARGET_JOB = "BENATS_TARGET_JOB"
+ENV_ZHAOPIN_TARGET_JOB = "BENATS_ZHAOPIN_TARGET_JOB"
 
 
 def app_data_dir() -> Path:
@@ -47,6 +48,7 @@ class AppSettings:
     feishu_webhook_url: str = ""        # 飞书自定义机器人 Webhook 地址
     feishu_sign_secret: str = ""        # 飞书签名密钥，DPAPI 加密保存
     boss_target_job: str = ""           # 招聘接入的当前目标岗位；留空时回退到环境变量与默认岗位
+    zhaopin_target_job: str = ""        # 智联招聘接入的当前目标岗位；留空时回退到环境变量
 
     def normalized(self) -> "AppSettings":
         base_url = self.base_url.strip().rstrip("/")
@@ -68,6 +70,7 @@ class AppSettings:
             feishu_webhook_url=self.feishu_webhook_url.strip(),
             feishu_sign_secret=self.feishu_sign_secret.strip(),
             boss_target_job=self.boss_target_job.strip(),
+            zhaopin_target_job=self.zhaopin_target_job.strip(),
         )
 
     @property
@@ -91,6 +94,11 @@ class AppSettings:
         """当前生效的目标岗位：设置项 → 环境变量；均未配置时为空，表示处理全部职位。"""
         return self.boss_target_job.strip() or os.getenv(ENV_BOSS_TARGET_JOB, "").strip()
 
+    @property
+    def effective_zhaopin_target_job(self) -> str:
+        """当前生效的智联目标岗位：设置项 → 环境变量；均未配置时为空，表示处理全部职位。"""
+        return self.zhaopin_target_job.strip() or os.getenv(ENV_ZHAOPIN_TARGET_JOB, "").strip()
+
     def public_dict(self) -> dict[str, object]:
         return {
             "base_url": self.base_url,
@@ -107,6 +115,7 @@ class AppSettings:
             "feishu_webhook_url": self.feishu_webhook_url,
             "feishu_sign_configured": bool(self.effective_feishu_sign_secret),
             "boss_target_job": self.effective_boss_target_job,
+            "zhaopin_target_job": self.effective_zhaopin_target_job,
             "is_ready": self.is_ready,
         }
 

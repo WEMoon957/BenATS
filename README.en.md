@@ -101,7 +101,7 @@ Zhaopin is integrated through a separately deployed zhaopin-cli, which exposes t
 | **Connector** | `app/connectors/zhaopin_cli.py` invokes these commands as a subprocess and parses the plain-text output into structured data. |
 
 > [!NOTE]
-> Zhaopin currently provides command-line capability and a connector; the scheduled automation flow is not wired up yet. Prerequisites and setup steps are in [APP_GUIDE「智联招聘」](APP_GUIDE.md#智联招聘) (Chinese).
+> Zhaopin is wired into the background automation engine: pulling positions, pulling recommended candidates, greeting, and requesting attached resumes all go through a "draft first, execute after HR approval" flow. Scope it with the "Zhaopin target position" setting or the `BENATS_ZHAOPIN_TARGET_JOB` environment variable. Reading unread messages, downloading attached resumes, and auto-scoring still apply to BOSS only. Prerequisites and setup steps are in [APP_GUIDE「智联招聘」](APP_GUIDE.md#智联招聘) (Chinese).
 
 ### Resume screening
 
