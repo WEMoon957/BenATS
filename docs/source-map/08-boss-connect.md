@@ -18,7 +18,8 @@ zhaopin-cli（独立部署，子进程调用）
   ├─ positions ────────────── 在招职位列表（没有 JD 命令）
   ├─ recommend [关键词] ───── 职位推荐候选人；打招呼前必须先切到该页
   ├─ greet <姓名> [姓名...] ─ 打招呼；支持多姓名批量，单人失败不中断整批
-  └─ request <姓名> [姓名...] [动作] ─ 打开聊天框索要附件简历；同样支持批量
+  ├─ request <姓名> [姓名...] [动作] ─ 打开聊天框索要附件简历；同样支持批量
+  └─ download / download-all ─ 把对方发来的附件简历统一下载到 ~/.zhaopin-cli/downloads/
         │
         ▼
 AutomationEngine.run_once()（默认每 300 秒一轮，daemon 线程）

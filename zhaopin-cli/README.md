@@ -6,14 +6,22 @@
 
 ## 安装
 
+前置条件：Node.js ≥ 20，本机已安装 Chrome 或 Edge。CLI 会自动探测浏览器的常见安装位置，也可以设置 `CHROME_PATH` 指定可执行文件。
+
 ```bash
-cd zhaopin-cli
-npm install
-npm run build
-npm link          # 注册全局 zhaopin 命令；也可用 node dist/cli/index.js 直接调用
+npm install -g @joohw/zhaopin-cli@latest
+zhaopin help
 ```
 
-前置条件：本机已安装 Chrome 或 Edge。CLI 会自动探测常见安装位置，也可以设置 `CHROME_PATH` 指定可执行文件。
+在源码目录里开发时改用本地安装。`npm install` 会通过 `prepare` 脚本自动完成构建，再把命令注册到全局：
+
+```bash
+cd zhaopin-cli
+npm install          # 装依赖，并自动执行 npm run build
+npm install -g .     # 注册全局 zhaopin 命令，等价于 npm link
+```
+
+也可以不注册全局命令，直接用 `node dist/cli/index.js` 调用。
 
 如果终端提示 `command not found: node`，说明 Node 没有加入 `PATH`。此时可以直接用包装脚本运行，不需要改动环境：
 
@@ -34,6 +42,8 @@ zhaopin recommend 后端开发    #    先切换到指定岗位，再读取候�
 zhaopin open 张三             # 4. 打开某位候选人的详情，输出正文
 zhaopin greet 张三 李四 王五   # 5. 对候选人打招呼；可一次传多人批量执行
 zhaopin request 张三 李四 resume  # 6. 批量索要附件简历
+zhaopin download 张三 李四    # 7. 批量下载对方发来的附件简历
+zhaopin download-all         # 8. 扫描全部会话，统一下载所有收到的附件简历
 zhaopin home                 # 需要时直接跳到企业端候选人推荐页
 ```
 
@@ -50,8 +60,12 @@ zhaopin home                 # 需要时直接跳到企业端候选人推荐页
 | `zhaopin open <姓名>` | 打开候选人详情面板，输出正文并关闭 |
 | `zhaopin greet <姓名> [姓名...]` | 对候选人打招呼，首次会自动确认招呼语弹框；支持一次传多个姓名批量执行，姓名间用空格、逗号或顿号分隔 |
 | `zhaopin request <姓名> [姓名...] [动作...]` | 打开聊天框索要信息并支持批量。动作可取 `resume`（要附件简历）、`phone`（要电话，含二次确认）、`wechat`（要微信），可组合；不填默认 `resume` |
+| `zhaopin download <姓名> [姓名...]` | 下载指定候选人发来的附件简历，支持批量；此前已下载过的自动跳过 |
+| `zhaopin download-all` | 扫描聊天列表全部会话，把对方发来的附件简历统一下载到本地 |
 
 批量执行时一个人失败不会中断整批，输出末尾汇总成功与失败数量，有失败时进程以非零状态退出；相邻两人之间自动加 1.5～3 秒随机间隔降低风控风险，建议单批不超过 5～10 人。单人调用的输出格式与批量调用中单人的段落格式保持一致，Python 侧逐人调用的解析不受影响。
+
+附件简历统一下载到 `~/.zhaopin-cli/downloads/`，文件名带候选人姓名与时间戳；服务端直发的 `.doc` 等附件由浏览器直接落盘，保留原始文件名。对方尚未发送（「附件简历索要中」）的会话不算可下载。
 
 输出为便于阅读与程序解析的纯文本，Python 侧 `app/connectors/zhaopin_cli.py` 依赖该格式做正则解析，调整输出时需同步更新。
 
@@ -88,10 +102,16 @@ zhaopin-cli/
 
 ## 自检
 
-首次使用或排查问题时，先跑一遍自检：
+首次使用或排查问题时，先跑一遍自检。源码目录里直接运行：
 
 ```bash
 node scripts/self-check.mjs
+```
+
+全局安装（`npm install -g`）时脚本随包一起发布，用 `npm root -g` 定位：
+
+```bash
+node "$(npm root -g)/@joohw/zhaopin-cli/scripts/self-check.mjs"
 ```
 
 脚本会逐项检查 Node 版本、浏览器可执行文件、数据目录写入、智联域名可达性，以及浏览器能否启动并建立 CDP 连接。任一项失败都会给出具体原因。
@@ -105,3 +125,16 @@ npm run typecheck    # 类型检查
 npm run build        # 构建
 npm run dev -- --help
 ```
+
+## 发布
+
+包名 `@joohw/zhaopin-cli`，发布到公共 npm registry，发布后任何人无需账号即可 `npm install -g` 安装。
+
+```bash
+npm login            # 需要 @joohw scope 的发布权限
+npm publish
+```
+
+`package.json` 已声明 `publishConfig.access: "public"`，把访问级别显式固定为公开可安装。npm 对新建包的默认值本来就是 public，这样写是为了不受本地 npm 配置影响（`restricted` 会让外部用户安装时报 404）。
+
+`prepare` 脚本会在打包前自动执行 `npm run build`，因此 `dist/` 不需要提交到版本库。

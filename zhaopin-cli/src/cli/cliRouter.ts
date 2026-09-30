@@ -1,5 +1,6 @@
 /** 本文件负责解析命令行参数并分发到各命令实现。 */
 
+import { runDownloadAllResumes, runDownloadResume } from '../toolset/download-resume.js';
 import { runGreet, runGreetMany } from '../toolset/greet.js';
 import { runHome } from '../toolset/home.js';
 import { runLogin } from '../toolset/login.js';
@@ -22,6 +23,8 @@ function usageText(): string {
     '  zhaopin greet <姓名> [姓名...]    对候选人打招呼，支持一次传多人批量执行',
     '  zhaopin request <姓名> [姓名...] [动作...]  打开聊天框索要信息并支持批量，',
     '                                  动作可取 resume / phone / wechat，可组合，默认 resume',
+    '  zhaopin download <姓名> [姓名...]  下载指定候选人发来的附件简历，支持批量',
+    '  zhaopin download-all            扫描全部会话，把对方发来的附件简历统一下载到本地',
     '',
     '  姓名之间用空格、逗号或顿号分隔，例如：',
     '  zhaopin greet 张三 李四 王五',
@@ -116,6 +119,19 @@ export async function runCli(argv: string[]): Promise<void> {
       reportBatch(await runRequestMany(names, resolvedKinds));
       return;
     }
+
+    case 'download': {
+      const names = parseNames(argument);
+      if (names.length === 0) {
+        throw new Error('请提供候选人姓名，例如：zhaopin download 张三 李四');
+      }
+      reportBatch(await runDownloadResume(names));
+      return;
+    }
+
+    case 'download-all':
+      reportBatch(await runDownloadAllResumes());
+      return;
 
     case undefined:
     case '':

@@ -1,11 +1,16 @@
 /** 本文件负责启动本机 Chrome 并通过 CDP 建立连接。 */
 
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
 import puppeteer, { type Browser } from 'puppeteer-core';
-import { BROWSER_USER_DATA_DIR, REMOTE_DEBUGGING_PORT, ensureAppDataLayout } from '../config.js';
+import {
+  BROWSER_USER_DATA_DIR,
+  REMOTE_DEBUGGING_PORT,
+  RESUME_DOWNLOADS_DIR,
+  ensureAppDataLayout,
+} from '../config.js';
 
 /** Chrome 启动日志中的 CDP WebSocket 地址（可能在 stdout 或 stderr）。 */
 const CDP_WEBSOCKET_ENDPOINT_REGEX = /^DevTools listening on (ws:\/\/.*)$/;
@@ -210,12 +215,17 @@ export async function connectBrowser(options: ConnectBrowserOptions = {}): Promi
 
   clearSpawnedChromeProcessRef();
 
+  // 附件简历等文件下载统一落盘到 `~/.zhaopin-cli/downloads/`，供下载类命令读取。
+  mkdirSync(RESUME_DOWNLOADS_DIR, { recursive: true });
+  const downloadBehavior = { policy: 'allow', downloadPath: RESUME_DOWNLOADS_DIR } as const;
+
   // 优先复用固定端口上已在跑的 Chrome，跨命令保持同一登录态与同一标签页。
   const existingWsUrl = await probeRemoteDebuggingWsEndpoint(REMOTE_DEBUGGING_PORT, 800);
   if (existingWsUrl) {
     return await puppeteer.connect({
       browserWSEndpoint: existingWsUrl,
       defaultViewport: null,
+      downloadBehavior,
     });
   }
 
@@ -276,7 +286,11 @@ export async function connectBrowser(options: ConnectBrowserOptions = {}): Promi
   }
 
   try {
-    return await puppeteer.connect({ browserWSEndpoint: wsUrl, defaultViewport: null });
+    return await puppeteer.connect({
+      browserWSEndpoint: wsUrl,
+      defaultViewport: null,
+      downloadBehavior,
+    });
   } catch (error) {
     try {
       proc.kill();

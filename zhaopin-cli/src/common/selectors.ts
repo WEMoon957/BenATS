@@ -17,6 +17,9 @@ export const LOGIN_URL = 'https://rd6.zhaopin.com/app/recommend';
 /** 主动打招呼流程的入口页，候选人推荐列表在这里。 */
 export const ENTRY_URL = 'https://rd6.zhaopin.com/app/recommend';
 
+/** 聊天页地址，`download` 系列命令在会话列表里找人并下载附件简历。 */
+export const CHAT_URL = 'https://rd6.zhaopin.com/app/im';
+
 /** 候选人列表每次真实滚轮的滚动距离（像素）。 */
 export const SCROLL_DISTANCE = 620;
 
@@ -126,3 +129,21 @@ export const CHAT_OPEN_SELECTORS = [
   '.resume-btn-small',
   '.small-screen-btn.is-mr-16',
 ] as const;
+
+/** 聊天页左侧会话列表里的单个会话条目。 */
+export const SESSION_ITEM_SELECTOR = '.im-session-item';
+
+/** 会话条目里的候选人姓名。 */
+export const SESSION_NAME_SELECTOR = '.im-session-item__name-title';
+
+/** 会话列表的滚动容器（虚拟列表），用于加载更多会话。 */
+export const SESSION_LIST_SCROLL_SELECTOR = '.im-session-list__virtual';
+
+/**
+ * 聊天页右侧简历详情栏里「对方发来的附件简历」入口。
+ * 带 `is-disabled` 时是「附件简历索要中」（我方已索要、对方未发），不可点击下载。
+ */
+export const ATTACH_RESUME_CARD_SELECTOR = '.newest-attach-resume:not(.is-disabled)';
+
+/** 附件简历下载直链的域名特征，用于识别点击后新开的标签页。 */
+export const ATTACH_DOWNLOAD_URL_MARKER = 'attachment.zhaopin.com';

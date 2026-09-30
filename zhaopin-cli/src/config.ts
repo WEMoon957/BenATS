@@ -17,6 +17,12 @@ export const BROWSER_USER_DATA_DIR = join(CACHE_DIR, 'browser-data');
 export const DETAIL_SCREENSHOTS_DIR = join(CACHE_DIR, 'detail-screenshots');
 
 /**
+ * 附件简历统一下载目录，`download` / `download-all` 命令的落盘位置。
+ * 放在 APP_HOME 根下（不放 .cache），方便 HR 直接找到。
+ */
+export const RESUME_DOWNLOADS_DIR = join(APP_HOME, 'downloads');
+
+/**
  * 远程调试端口。zhaopin-cli 使用独立的数据目录，因此可以固定占用一个端口，
  * 让多个命令直接通过 `http://127.0.0.1:<port>/json/version` 复用同一只浏览器。
  * 默认 53471，与 boss-cli 的 53470 错开，避免两个 CLI 互相抢端口。
@@ -36,7 +42,7 @@ let appDataLayoutReady = false;
 export function ensureAppDataLayout(): void {
   if (appDataLayoutReady) return;
   appDataLayoutReady = true;
-  for (const dir of [CACHE_DIR, BROWSER_USER_DATA_DIR, DETAIL_SCREENSHOTS_DIR]) {
+  for (const dir of [CACHE_DIR, BROWSER_USER_DATA_DIR, DETAIL_SCREENSHOTS_DIR, RESUME_DOWNLOADS_DIR]) {
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true });
     }
