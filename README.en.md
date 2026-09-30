@@ -70,17 +70,38 @@ Currently supported modules:
 
 | Capability | Description |
 | --- | --- |
+| **Target position** | Pick the active position from the fetched list in the Boss Connect panel; only that position's job posts, recommended candidates, and inbound messages are processed. Leave it empty to process all positions. |
 | **Automatic position import** | Pulls open positions on a schedule and creates a screening task with the job brief for every position seen for the first time. |
 | **Candidate sourcing** | Pulls recommended candidates for each position and drafts a "greet" outreach action. |
 | **Outreach review** | Every outbound action is drafted first. HR approves or rejects each draft in Boss Connect, or sends all pending drafts at once; a failed send records its reason without blocking the other drafts. |
-| **Inbound message handling** | When a candidate messages you, the app auto-accepts attached-resume requests, and for other messages drafts a reply that also asks for the resume. |
-| **Attached resume retrieval** | Attached resumes from contacted candidates are downloaded into the matching task; after three consecutive rounds without a resume, one "request resume" draft is created. |
+| **Inbound message handling** | When a candidate messages you, the app auto-accepts attached-resume request cards; an attached resume the candidate already sent is downloaded instead of requested again; other messages get a drafted reply that also asks for the resume. |
+| **Attached resume retrieval** | Attached resumes from candidates are downloaded into the matching task; a contacted candidate who yields no resume for three consecutive rounds gets one "request resume" draft. |
 | **Screening hand-off** | Tasks with both a job brief and resumes start screening automatically, and S-tier candidates from a completed run enter a phone-confirmation task. |
 | **Deduplication** | Processed positions and candidate states are stored locally, so the same position or candidate never runs through the flow twice. |
 | **Engine control** | The automation engine starts with the app and advances one round every five minutes by default; you can stop it, start it again, or run a single round from the interface. |
 
 > [!NOTE]
 > Boss Connect requires a separately deployed boss-cli and a signed-in BOSS Zhipin account. Prerequisites and setup steps are in [APP_GUIDE「招聘接入」](APP_GUIDE.md#招聘接入) (Chinese).
+
+### Zhaopin Connect (智联招聘)
+
+Zhaopin is integrated through a separately deployed zhaopin-cli, which exposes these commands:
+
+| Capability | Description |
+| --- | --- |
+| **Sign-in** | `zhaopin login` opens the Zhaopin sign-in page for you to complete manually; the session is stored locally and reused by later commands. |
+| **Enterprise navigation** | `zhaopin home` jumps the browser straight to the Zhaopin enterprise candidate-recommendation page; if you are not signed in it tells you to run `zhaopin login` first. |
+| **Position listing** | `zhaopin positions [keyword]` opens the position picker and lists the selectable positions, optionally filtered by keyword. |
+| **Position switching** | `zhaopin recommend <keyword>` switches to the given position through the picker before reading candidates, instead of relying on the unstable current-position text. |
+| **Candidate listing** | `zhaopin recommend` loads the recommendation list with real mouse-wheel scrolling and prints each candidate's name, basic info, and whether they can still be greeted. |
+| **Detail reading** | `zhaopin open <name>` opens a candidate's detail panel, prints its text, and closes it again. |
+| **Greeting** | `zhaopin greet <name>` greets a candidate. The first-time greeting dialog is confirmed automatically, and candidates who were already greeted are detected and skipped. |
+| **Requesting information** | `zhaopin request <name> [resume\|phone\|wechat]` opens the chat panel to ask for an attached resume, a phone number, or a WeChat ID; the actions can be combined and default to `resume`. The phone request's method chooser is confirmed automatically. |
+| **Resume analysis** | `app/connectors/zhaopin_imports.py` reads recommended candidates, captures their online resume text, stores it as Markdown, and writes it into a Talent Hub job so the existing screening pipeline (criteria → evaluation → S/A/B/C) applies unchanged. |
+| **Connector** | `app/connectors/zhaopin_cli.py` invokes these commands as a subprocess and parses the plain-text output into structured data. |
+
+> [!NOTE]
+> Zhaopin currently provides command-line capability and a connector; the scheduled automation flow is not wired up yet. Prerequisites and setup steps are in [APP_GUIDE「智联招聘」](APP_GUIDE.md#智联招聘) (Chinese).
 
 ### Resume screening
 
@@ -126,6 +147,7 @@ Currently supported modules:
 - **Frontend**: React + TypeScript frontend (Vite build), served by FastAPI.
 - **Optional Feishu notifications**: pushes result summaries via a Feishu custom bot Webhook, with no new third-party dependency.
 - **Optional Boss Zhipin integration**: reads positions, candidates, and attached resumes through a locally deployed boss-cli (a standalone Node/TS CLI driving the local Chrome over CDP), and hands HR-approved outreach actions to it for sending. When it is missing or not signed in, only Boss Connect is unavailable; the other modules are unaffected.
+- **Optional Zhaopin integration**: reads positions, candidates, and details and performs greetings through a locally deployed zhaopin-cli (a standalone Node/TS CLI driving the local Chrome over CDP). Clicking, scrolling, and typing use native browser events rather than injected scripts. When it is missing or not signed in, only the Zhaopin commands are unavailable; the other modules are unaffected.
 
 ## Quick start (development)
 
@@ -278,6 +300,7 @@ The script creates `dist/TalentHub.app` and `release/<version>/macos/TalentHub-m
 | `app/` | FastAPI service, screening & phone pipelines, model client, runtime tools, and `connectors/` recruiting-platform integrations |
 | `frontend/` | React + TypeScript frontend project (Vite build) |
 | `boss-cli/` | BOSS Zhipin automation CLI source (deployed separately, invoked as a subprocess) |
+| `zhaopin-cli/` | Zhaopin automation CLI source (deployed separately, invoked as a subprocess) |
 | `packaging/` | PyInstaller and Inno Setup packaging config |
 | `scripts/` | Build and release verification scripts |
 | `docs/references/` | External background reference files (not part of the app) |

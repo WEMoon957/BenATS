@@ -41,6 +41,9 @@ packaging/version_info.txt
 # WorkBuddy workspace memory (agent working notes, not source)
 .workbuddy/
 
+# macOS metadata
+.DS_Store
+
 # Windows explorer metadata
 Thumbs.db
 desktop.ini

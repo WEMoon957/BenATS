@@ -25,6 +25,8 @@
 | `app/runtime/speech_to_text.py` | 火山 ASR 请求、音频校验和转写渲染 | 电话处理、ASR 配置与验证 |
 | `app/runtime/phone_screening.py` | 电话转写编排、结构化整理、必填结构校验、narrative/Markdown 渲染和事实引用录音定位 | Call 状态、摘要文件、电话详情 |
 | `app/connectors/boss_cli.py` | 以子进程调用 boss-cli、解析其纯文本输出、`BOSSCLI_BIN` 覆盖与错误归一（`BossCliError`） | 招聘接入导入、触达执行、自动化引擎 |
+| `app/connectors/zhaopin_cli.py` | 以子进程调用 zhaopin-cli、解析其纯文本输出、`ZHAOPINCLI_BIN` 覆盖与错误归一（`ZhaopinCliError`） | 智联招聘职位与候选人读取、详情获取、打招呼、索要简历与联系方式 |
+| `app/connectors/zhaopin_imports.py` | 读取智联推荐候选人并把在线简历落盘，组装成 Talent Hub 任务（`import_candidates`） | 智联候选人与简历导入、筛选流水线入口 |
 | `app/connectors/imports.py` | 职位 JD 与推荐候选人（含可下载的附件简历）导入为一个新任务的编排 | 招聘接入导入端点、任务材料 |
 | `app/connectors/outreach.py` | 触达动作数据类、草稿仓储（`JsonStore` 子类）与动作到 boss 命令的翻译执行 | 触达审核端点、自动化引擎 |
 | `app/connectors/automation.py` | 后台轮询引擎：职位/候选人/消息同步、触达结果回写、附件简历下载与筛选启动、S 级电话任务同步；处理状态持久化在 `automation.json` | 招聘接入界面、Job 与 Call 仓储 |

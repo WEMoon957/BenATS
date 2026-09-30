@@ -1,0 +1,33 @@
+{
+  "name": "@talent-hub/zhaopin-cli",
+  "version": "0.1.0",
+  "description": "智联招聘自动化 CLI：职位切换、候选人读取、详情抓取与打招呼。基于 Puppeteer/CDP 驱动本机 Chrome，供 Talent Hub 以子进程方式调用",
+  "keywords": [
+    "zhaopin",
+    "智联招聘",
+    "招聘自动化",
+    "hr-automation",
+    "recruitment-automation",
+    "puppeteer",
+    "cdp",
+    "cli"
+  ],
+  "type": "module",
+  "main": "dist/cli/index.js",
+  "bin": {
+    "zhaopin": "dist/cli/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "npm run build && node dist/cli/index.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "puppeteer-core": "^24.29.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.0",
+    "typescript": "^5.3.3"
+  },
+  "private": true
+}
