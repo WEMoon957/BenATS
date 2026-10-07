@@ -1,6 +1,6 @@
 """考勤业务逻辑：打卡解析、员工匹配、导入处理、跨日疑似检测与结果重算。
 
-移植自西鸣人事管理系统（Django），改为在 SQLite 数据层上执行，保持核算口径一致。
+读写经 AttendanceStore 落到本机 SQLite。
 """
 
 from __future__ import annotations

@@ -6,10 +6,12 @@
 
 ## 1. 项目定位与边界
 
-Talent Hub 是一个本机运行的 Python/FastAPI 招聘工作台，前端为 React + TypeScript（Vite 构建，构建产物 `frontend/dist` 由 FastAPI 托管）。它包含两条主要业务链路：
+Talent Hub 是一个本机运行的 Python/FastAPI 招聘工作台，前端为 React + TypeScript（Vite 构建，构建产物 `frontend/dist` 由 FastAPI 托管）。业务范围：
 
 1. 简历筛选：JD、简历上传、标准生成与人工校准、候选人评估、证据校验、硬性门槛程序化过滤、A/B/C 分级、Excel 交付和候选人横向对比。
 1. 电话确认：录音上传、火山引擎 ASR、AI 结构化整理（含动态 Remark、软性素质评价和可选快筛问答）、三层整理记录 narrative、事实引用录音定位、人工编辑和 Markdown 下载。整理只有一个业务阶段；事实引用只用于尝试定位录音时间，业务内容由 HR 复核。
+1. 招聘接入与候选人跟进：以子进程驱动 boss-cli / zhaopin-cli 拉取职位、推荐候选人与往来消息，生成待审核触达草稿；候选人按阶段状态机跟进，拿到的附件简历进入筛选流水线。
+1. 考勤核算：导入打卡表、按考勤规则核算、处理跨日疑似、确认结果并导出核算表，可同步飞书打卡数据。
 
 系统边界：
 
@@ -43,13 +45,18 @@ FastAPI app/main.py
   │    └─ push_with_status ─────── app/feishu.py ── 飞书 Webhook（逐条电话记录）
   ├─ AutomationEngine ──────────── app/connectors/automation.py
   │    ├─ BossCliConnector ────── app/connectors/boss_cli.py ── 子进程 boss-cli（本机 Chrome）
+  │    ├─ ZhaopinCliConnector ─── app/connectors/zhaopin_cli.py ── 子进程 zhaopin-cli（本机 Chrome）
   │    ├─ OutreachStore ───────── app/connectors/outreach.py ── outreaches/<id>/
   │    ├─ AutomationStore ─────── app/connectors/automation.py ── automation.json
+  │    ├─ RecruitmentStore ────── app/recruitment/db.py ── recruitment.db（候选人阶段状态机）
   │    └─ EvaluationEngine / CallRepository ── 启动筛选、创建 S 级电话任务
+  ├─ RubricService ────────────── app/rubric/ ── 评分标准生成、解析、打分与导出
+  ├─ AttendanceStore ──────────── app/attendance/db.py ── attendance.db（打卡核算与导出）
+  │    └─ FeishuSyncEngine ────── app/attendance/sync.py ── 飞书考勤打卡
   └─ artifact_preview.py ───────── Markdown / XLSX 限量预览
 ```
 
-本项目不使用数据库。`job.json`、`record.json`、结果 JSON 和文件目录共同构成持久化状态，因此修改字段时不能只看 Pydantic 模型或 API；还要考虑已持久化 JSON 的加载、恢复逻辑和前端消费。
+持久化分两类。任务型状态（`job.json`、`record.json`、结果 JSON 与文件目录）落在数据目录的 JSON 与文件中；考勤与招聘候选人状态落在数据目录下的本机 SQLite（`attendance.db`、`recruitment.db`）。修改字段时不能只看 Pydantic 模型或 API，还要考虑已持久化数据的加载、恢复逻辑和前端消费。
 
 ## 4. 启动与本地会话数据流
 
@@ -67,6 +74,7 @@ launcher.py 或 python -m app.main
   → create_app(data_dir, app_token)
   → 装配 SettingsStore / repositories / engines
   → app.state.automation.start() 启动招聘接入轮询线程（仅 main() 启动路径拉起）
+  → app.state.feishu_sync.start() 启动飞书考勤同步线程（仅 main() 启动路径拉起）
   → Uvicorn 绑定 127.0.0.1
   → GET / 注入 app_token 到 HTML meta
   → 前端 main.tsx 挂载 React App

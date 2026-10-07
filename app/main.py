@@ -7,6 +7,7 @@ import hashlib
 import io
 import json
 import logging
+import os
 import secrets
 import socket
 import threading
@@ -31,6 +32,7 @@ from .llm import LLMError, LLMRequestError, LLMResponseError, OpenAICompatibleCl
 from .models import CallField, CallSummary
 from .pipeline import CONCLUSION_ORDER, EvaluationEngine, ROOT, conclusion_grade, ocr_status
 from .repository import JobRepository
+from .runtime.extract_resume_text import atomic_write_text
 from .runtime.phone_screening import CallProcessor, render_call_summary_markdown
 from .connectors.boss_cli import BossCliConnector, BossCliError
 from .connectors.imports import import_position
@@ -463,6 +465,10 @@ def create_app(data_dir: Path | None = None, app_token: str | None = None) -> Fa
     async def boss_cli_error_handler(_request: Request, exc: BossCliError):
         return JSONResponse({"detail": str(exc)}, status_code=503)
 
+    @app.exception_handler(ZhaopinCliError)
+    async def zhaopin_cli_error_handler(_request: Request, exc: ZhaopinCliError):
+        return JSONResponse({"detail": str(exc)}, status_code=503)
+
     @app.get("/", response_class=HTMLResponse)
     async def index():
         html = (static_dir / "index.html").read_text(encoding="utf-8")
@@ -844,11 +850,11 @@ def create_app(data_dir: Path | None = None, app_token: str | None = None) -> Fa
         )
         summary_dir = call_repository.call_dir(call_id) / "summaries"
         summary_dir.mkdir(parents=True, exist_ok=True)
-        (summary_dir / f"{item_id}.json").write_text(
-            summary.model_dump_json(indent=2), encoding="utf-8"
+        atomic_write_text(
+            summary_dir / f"{item_id}.json", summary.model_dump_json(indent=2)
         )
-        (summary_dir / f"{item_id}.md").write_text(
-            render_call_summary_markdown(summary), encoding="utf-8"
+        atomic_write_text(
+            summary_dir / f"{item_id}.md", render_call_summary_markdown(summary)
         )
         return item
 
@@ -1182,7 +1188,7 @@ def create_app(data_dir: Path | None = None, app_token: str | None = None) -> Fa
 
     @app.get("/api/boss/automation/status")
     async def automation_status():
-        return {"running": automation.running}
+        return {"running": automation.running, "stopping": automation.stopping}
 
     @app.get("/api/boss/target-job")
     async def boss_target_job():
@@ -1221,7 +1227,7 @@ def create_app(data_dir: Path | None = None, app_token: str | None = None) -> Fa
 
     @app.post("/api/boss/automation/run")
     async def automation_run():
-        return await run_in_threadpool(automation.run_once)
+        return await run_in_threadpool(lambda: automation.run_once(manual=True))
 
     @app.post("/api/boss/automation/start")
     async def automation_start():
@@ -1385,8 +1391,18 @@ def create_app(data_dir: Path | None = None, app_token: str | None = None) -> Fa
             return results
 
         pairs = []
+        total = 0
         for f in files:
             data = await f.read()
+            if len(data) > MAX_FILE_BYTES:
+                raise HTTPException(
+                    status_code=413, detail=f"文件超过 {MAX_FILE_BYTES // (1024 * 1024)} MB 限制"
+                )
+            total += len(data)
+            if total > MAX_JOB_BYTES:
+                raise HTTPException(
+                    status_code=413, detail=f"文件总大小超过 {MAX_JOB_BYTES // (1024 * 1024)} MB 限制"
+                )
             pairs.append((f.filename or "", data))
         return await run_in_threadpool(_run, pairs)
 
@@ -1471,7 +1487,11 @@ def main() -> None:
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument("--data-dir", type=Path)
     args = parser.parse_args()
-    data_dir = args.data_dir or app_data_dir()
+    if args.data_dir:
+        # 数据目录只保留一个事实来源：--data-dir 同步写回 TALENT_HUB_DATA_DIR，
+        # 使按 app_data_dir() 落盘的模块（考勤/招聘 SQLite 等）与任务仓储使用同一根目录。
+        os.environ["TALENT_HUB_DATA_DIR"] = str(args.data_dir.expanduser().resolve())
+    data_dir = app_data_dir()
     configure_app_logging(data_dir)
     existing_url = existing_app_url(args.port)
     if existing_url:

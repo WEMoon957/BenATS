@@ -30,5 +30,6 @@
 | <a id="18-当前刻意保留的人工边界"></a>18. 当前刻意保留的人工边界 | [变更影响指南](source-map/07-change-guide.md#18-当前刻意保留的人工边界) | 简历与电话业务专题 |
 | <a id="19-文档维护要求"></a>19. 文档维护要求 | [变更影响指南](source-map/07-change-guide.md#19-文档维护要求) | 本入口与对应专题 |
 | <a id="20-招聘接入端到端数据流"></a>20. 招聘接入端到端数据流 | [招聘接入链路](source-map/08-boss-connect.md#20-招聘接入端到端数据流) | [API 与运行时约束](source-map/06-api-runtime.md#11-前后端-api-契约) |
+| <a id="21-招聘候选人与考勤"></a>21. 招聘候选人与考勤 | [代码地图](source-map/02-code-map.md#2-代码地图) | [API 与运行时约束](source-map/06-api-runtime.md#117-招聘候选人与考勤端点) |
 
 电话链路中的事实引用只用于尝试定位录音时间，不裁决正文、软性素质评价或字段状态；具体契约见[电话确认链路](source-map/05-phone-screening.md)与[配置、密钥与安全边界](source-map/03-configuration-security.md)。

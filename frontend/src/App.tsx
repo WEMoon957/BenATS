@@ -263,13 +263,19 @@ export function App() {
     setToolStripOpen((open) => !open);
   };
 
-  /** 工具切换（phone → 重置并打开电话视图，boss → 打开招聘接入，attendance → 打开考勤，screening → 重置筛选工作区） */
-  const switchTool = (tool: "recruitment" | "attendance") => {
+  /** 工具切换：招聘工作台 / 简历筛选（重置筛选工作区）/ 电话确认（重置电话工作区）/ 考勤 */
+  const switchTool = (tool: "recruitment" | "screening" | "phone" | "attendance") => {
     setToolStripOpen(false);
     localStorage.setItem("talentHub.activeTool", tool);
     localStorage.removeItem("talentHub.lastCall");
     if (tool === "recruitment") {
       navigate("recruitment");
+    } else if (tool === "screening") {
+      resetScreeningWorkspace();
+      navigate("setup");
+    } else if (tool === "phone") {
+      resetPhoneWorkspace();
+      navigate("phone");
     } else {
       navigate("attendance");
     }
@@ -293,7 +299,14 @@ export function App() {
         ? t("modelConnected", { model: String(state.settings.model ?? "") })
         : t("modelPending");
   const activeToolRaw = localStorage.getItem("talentHub.activeTool");
-  const activeTool = activeToolRaw === "attendance" ? "attendance" : activeToolRaw === "recruitment" ? "recruitment" : "screening";
+  const activeTool =
+    activeToolRaw === "attendance"
+      ? "attendance"
+      : activeToolRaw === "recruitment"
+        ? "recruitment"
+        : activeToolRaw === "phone"
+          ? "phone"
+          : "screening";
   const viewTitle =
     view === "recruitment"
       ? "招聘工作台"
@@ -347,12 +360,37 @@ export function App() {
               type="button"
               data-tool="recruitment"
               className={activeTool === "recruitment" ? "active" : ""}
-              title="招聘工作台"
-              aria-label="招聘工作台"
+              title={t("toolRecruitment")}
+              aria-label={t("toolRecruitment")}
               onClick={() => switchTool("recruitment")}
             >
               <svg aria-hidden="true" viewBox="0 0 24 24">
                 <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              data-tool="screening"
+              className={activeTool === "screening" ? "active" : ""}
+              title={t("toolScreening")}
+              aria-label={t("toolScreening")}
+              onClick={() => switchTool("screening")}
+            >
+              <svg aria-hidden="true" viewBox="0 0 24 24">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
+                <path d="M14 2v6h6M8 13h8M8 17h5" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              data-tool="phone"
+              className={activeTool === "phone" ? "active" : ""}
+              title={t("toolPhone")}
+              aria-label={t("toolPhone")}
+              onClick={() => switchTool("phone")}
+            >
+              <svg aria-hidden="true" viewBox="0 0 24 24">
+                <path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.2a2 2 0 0 1 2.1-.5c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2Z" />
               </svg>
             </button>
             <button

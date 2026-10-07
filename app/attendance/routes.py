@@ -17,6 +17,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from ..config import app_data_dir
+from ..repository import safe_filename
 from .db import WRITE_ROLES, AttendanceStore, hash_password, verify_password
 from .exporter import build_summary_workbook
 from .services import (
@@ -44,6 +45,7 @@ def account_payload(account: dict) -> dict:
         "role": account["role"],
         "department": account["department"],
         "is_active": bool(account["is_active"]),
+        "must_change_password": bool(account["must_change_password"]),
     }
 
 
@@ -58,6 +60,8 @@ def require_account(request: Request, store: AttendanceStore, write: bool = Fals
         raise HTTPException(status_code=401, detail="账号不存在或已停用")
     if write and account["role"] not in WRITE_ROLES:
         raise HTTPException(status_code=403, detail="当前角色没有写权限")
+    if write and account["must_change_password"]:
+        raise HTTPException(status_code=403, detail="请先修改初始密码后再操作")
     return account
 
 
@@ -103,12 +107,6 @@ class EmployeeInput(BaseModel):
     attendance_policy_id: int | None = None
     expected_days_override: float | None = None
     phone: str = ""
-    bank_name: str = ""
-    bank_account_holder: str = ""
-    bank_province: str = ""
-    bank_branch: str = ""
-    bank_card_number: str = ""
-    alipay_account: str = ""
     tag_ids: list[int] = []
 
 
@@ -236,7 +234,7 @@ def register_routes(app: FastAPI, store: AttendanceStore, sync_engine: FeishuSyn
         if not verify_password(payload.current_password, account["password_hash"]):
             raise HTTPException(status_code=400, detail="当前密码错误")
         store.execute(
-            "UPDATE account SET password_hash = ? WHERE id = ?",
+            "UPDATE account SET password_hash = ?, must_change_password = 0 WHERE id = ?",
             (hash_password(payload.new_password), account["id"]),
         )
         return {"ok": True}
@@ -364,15 +362,13 @@ def register_routes(app: FastAPI, store: AttendanceStore, sync_engine: FeishuSyn
         try:
             employee_id = store.execute(
                 "INSERT INTO employee (employee_no, name, aliases, department, position, join_date, "
-                "employment_status, active, attendance_policy_id, expected_days_override, phone, bank_name, "
-                "bank_account_holder, bank_province, bank_branch, bank_card_number, alipay_account, "
-                "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "employment_status, active, attendance_policy_id, expected_days_override, phone, "
+                "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     payload.employee_no, payload.name, _json.dumps(payload.aliases, ensure_ascii=False),
                     payload.department, payload.position, payload.join_date, payload.employment_status,
                     1 if payload.active else 0, payload.attendance_policy_id, payload.expected_days_override,
-                    payload.phone, payload.bank_name, payload.bank_account_holder, payload.bank_province,
-                    payload.bank_branch, payload.bank_card_number, payload.alipay_account, _now(), _now(),
+                    payload.phone, _now(), _now(),
                 ),
             )
         except Exception as exc:
@@ -393,14 +389,12 @@ def register_routes(app: FastAPI, store: AttendanceStore, sync_engine: FeishuSyn
         store.execute(
             "UPDATE employee SET employee_no = ?, name = ?, aliases = ?, department = ?, position = ?, "
             "join_date = ?, employment_status = ?, active = ?, attendance_policy_id = ?, "
-            "expected_days_override = ?, phone = ?, bank_name = ?, bank_account_holder = ?, bank_province = ?, "
-            "bank_branch = ?, bank_card_number = ?, alipay_account = ?, updated_at = ? WHERE id = ?",
+            "expected_days_override = ?, phone = ?, updated_at = ? WHERE id = ?",
             (
                 payload.employee_no, payload.name, _json.dumps(payload.aliases, ensure_ascii=False),
                 payload.department, payload.position, payload.join_date, payload.employment_status,
                 1 if payload.active else 0, payload.attendance_policy_id, payload.expected_days_override,
-                payload.phone, payload.bank_name, payload.bank_account_holder, payload.bank_province,
-                payload.bank_branch, payload.bank_card_number, payload.alipay_account, _now(), employee_id,
+                payload.phone, _now(), employee_id,
             ),
         )
         _set_employee_tags(store, employee_id, payload.tag_ids)
@@ -434,9 +428,9 @@ def register_routes(app: FastAPI, store: AttendanceStore, sync_engine: FeishuSyn
         default_expected_days: float = Query(default=25),
     ):
         require_account(request, store, write=True)
-        filename = file.filename or ""
+        filename = safe_filename(file.filename or "")
         if not filename.lower().endswith(".xlsx"):
-            raise HTTPException(status_code=400, detail="第一版仅支持 .xlsx 文件")
+            raise HTTPException(status_code=400, detail="仅支持 .xlsx 文件")
         raw = await file.read()
         if len(raw) > MAX_IMPORT_BYTES:
             raise HTTPException(status_code=400, detail="文件不能超过 10MB")

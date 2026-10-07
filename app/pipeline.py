@@ -28,6 +28,7 @@ from .models import (
 from .repository import JobRepository, safe_filename, utc_now
 from .runtime.build_candidate_workbook import build_workbook
 from .runtime.extract_resume_text import (
+    atomic_write_text,
     extract_file,
     is_resume_text_good_enough,
     normalize_text,
@@ -1250,8 +1251,8 @@ class EvaluationEngine:
             criteria_json = job_dir / "筛选标准.json"
             criteria.job_title = criteria.job_title.strip() or "未命名岗位"
             criteria_md = job_dir / safe_filename(f"{criteria.job_title}-简历筛选标准.md")
-            criteria_json.write_text(criteria.model_dump_json(indent=2), encoding="utf-8")
-            criteria_md.write_text(criteria_markdown(criteria), encoding="utf-8")
+            atomic_write_text(criteria_json, criteria.model_dump_json(indent=2))
+            atomic_write_text(criteria_md, criteria_markdown(criteria))
             self.repository.update(
                 job_id,
                 title=criteria.job_title,
@@ -1296,10 +1297,8 @@ class EvaluationEngine:
             criteria = ScreeningCriteria.model_validate({**existing, **payload})
             criteria.job_title = criteria.job_title.strip() or "未命名岗位"
             criteria_md = job_dir / safe_filename(f"{criteria.job_title}-简历筛选标准.md")
-            criteria_json.write_text(
-                criteria.model_dump_json(indent=2), encoding="utf-8"
-            )
-            criteria_md.write_text(criteria_markdown(criteria), encoding="utf-8")
+            atomic_write_text(criteria_json, criteria.model_dump_json(indent=2))
+            atomic_write_text(criteria_md, criteria_markdown(criteria))
             changes = {
                 "title": criteria.job_title,
                 "criteria_file": criteria_md.name,

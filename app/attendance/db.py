@@ -2,7 +2,7 @@
 
 设计约定：
 - 数据库文件位于数据目录下的 attendance.db（与 settings.json 同级）。
-- 单机单进程：共享一个连接（check_same_thread=False），全部读写经 _lock 串行化。
+- 单机单进程：每次读写新建连接并在结束时关闭，全部读写经 _lock 串行化。
 - 布尔值存 INTEGER(0/1)，JSON 字段存 TEXT，日期存 ISO 字符串，时间存 HH:MM。
 - 天数、扣款、覆盖天数等小数字段存 REAL，计算与比较统一 round 到 2 位小数。
 """
@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS account (
     role TEXT NOT NULL DEFAULT 'viewer',
     department TEXT NOT NULL DEFAULT '',
     is_active INTEGER NOT NULL DEFAULT 1,
+    must_change_password INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL
 );
 
@@ -75,12 +76,6 @@ CREATE TABLE IF NOT EXISTS employee (
     attendance_policy_id INTEGER REFERENCES attendance_policy(id) ON DELETE SET NULL,
     expected_days_override REAL,
     phone TEXT NOT NULL DEFAULT '',
-    bank_name TEXT NOT NULL DEFAULT '',
-    bank_account_holder TEXT NOT NULL DEFAULT '',
-    bank_province TEXT NOT NULL DEFAULT '',
-    bank_branch TEXT NOT NULL DEFAULT '',
-    bank_card_number TEXT NOT NULL DEFAULT '',
-    alipay_account TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -249,6 +244,12 @@ class AttendanceStore:
         conn = self._connect()
         try:
             conn.executescript(_SCHEMA)
+            # 既有库补列：CREATE TABLE IF NOT EXISTS 不会改动已存在的表
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(account)")}
+            if "must_change_password" not in columns:
+                conn.execute(
+                    "ALTER TABLE account ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0"
+                )
             conn.commit()
             self._ensure_default_admin(conn)
         finally:
@@ -267,8 +268,8 @@ class AttendanceStore:
         count = conn.execute("SELECT COUNT(*) FROM account").fetchone()[0]
         if count == 0:
             conn.execute(
-                "INSERT INTO account (username, password_hash, role, department, is_active, created_at) "
-                "VALUES (?, ?, ?, ?, 1, ?)",
+                "INSERT INTO account (username, password_hash, role, department, is_active, "
+                "must_change_password, created_at) VALUES (?, ?, ?, ?, 1, 1, ?)",
                 ("admin", hash_password("admin"), "admin", "", _now()),
             )
             conn.commit()

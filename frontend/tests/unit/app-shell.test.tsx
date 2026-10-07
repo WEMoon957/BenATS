@@ -241,3 +241,35 @@ describe("顶栏动作", () => {
   });
 
 });
+
+describe("顶栏工具入口", () => {
+  it("工具条提供招聘工作台、简历筛选、电话确认、考勤管理四个入口", async () => {
+    mockBootstrap(readySettings());
+    render(<App />);
+    await waitBootstrap();
+
+    // 工具条默认隐藏（隐藏元素不在可访问树内），展开后四个入口都应可见可查询
+    fireEvent.click(screen.getByRole("button", { name: "新建" }));
+    expect(screen.getByRole("button", { name: "招聘工作台" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "简历筛选" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "电话确认" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "考勤管理" })).toBeInTheDocument();
+  });
+  it("选择「简历筛选」进入新建筛选页，选择「电话确认」进入新建电话页", async () => {
+    mockBootstrap(readySettings());
+    render(<App />);
+    await waitBootstrap();
+
+    fireEvent.click(screen.getByRole("button", { name: "新建" }));
+    fireEvent.click(screen.getByRole("button", { name: "简历筛选" }));
+    expect(document.getElementById("setupView")!.hidden).toBe(false);
+    expect(document.body.dataset.view).toBe("setup");
+    expect(localStorage.getItem("talentHub.activeTool")).toBe("screening");
+
+    fireEvent.click(screen.getByRole("button", { name: "新建" }));
+    fireEvent.click(screen.getByRole("button", { name: "电话确认" }));
+    expect(document.getElementById("phoneView")!.hidden).toBe(false);
+    expect(document.getElementById("setupView")!.hidden).toBe(true);
+    expect(localStorage.getItem("talentHub.activeTool")).toBe("phone");
+  });
+});

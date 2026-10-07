@@ -5,7 +5,7 @@
 <h1 align="center" style="margin-top: 0;">Talent Hub</h1>
 
 <p align="center">
-  <em>A local-first, evidence-driven AI talent workbench that supports key hiring decisions with verifiable, deliverable assistance.</em>
+  <em>A local-first, evidence-driven AI HR workbench covering the full hiring flow and attendance accounting: from sourcing on BOSS Zhipin and AI pre-scoring through resume screening, phone confirmation, and candidate follow-up, plus automatic Feishu check-in sync and accounting — so every judgment has a traceable basis.</em>
 </p>
 
 <p align="center">
@@ -18,6 +18,7 @@
   <img src="https://img.shields.io/badge/Frontend-React%20%2B%20TS-61DAFB?style=flat&amp;logo=react&amp;logoColor=black" alt="Frontend: React + TS" />
   <img src="https://img.shields.io/badge/Excel-openpyxl-217346?style=flat" alt="Excel: openpyxl" />
   <img src="https://img.shields.io/badge/PDF-pdfplumber-7B5BF2?style=flat" alt="PDF: pdfplumber" />
+  <img src="https://img.shields.io/badge/Storage-SQLite-003B57?style=flat" alt="Storage: SQLite" />
 </p>
 
 <p align="center">
@@ -47,20 +48,22 @@
 
 ## What it solves
 
-The three most repetitive parts of hiring, and the ones whose judgment is easiest to distort by inconsistent standards: bulk resume screening, justifying and reviewing calls, and organizing phone recordings plus consolidating results.
+The three most repetitive parts of hiring, and the ones whose judgment is easiest to distort by inconsistent standards: bulk resume screening, justifying and reviewing calls, and organizing phone recordings plus consolidating results. Attendance accounting is the fourth: matching monthly Feishu check-ins to employees and computing attendance.
 
-Talent Hub runs these steps as one flow, leaves a verifiable basis for each one, and makes results ready to deliver. Settings, task materials, and results are stored locally by default; when model, ASR, or Feishu features are used, the corresponding content is sent to the configured service.
+Talent Hub runs hiring as one trackable funnel — source → pre-score → greet → collect resumes → screen → phone confirmation → interview → offer — and automates attendance accounting, leaving a verifiable basis for each step and making results ready to deliver. Settings, task materials, and results are stored locally by default; when model, ASR, or Feishu features are used, the corresponding content is sent to the configured service.
 
 ## HR productivity scenarios
 
 | Step | How Talent Hub handles it |
 | --- | --- |
-| **Candidate sourcing** | Pulls open positions and attached resumes from BOSS Zhipin and creates tasks automatically |
+| **Candidate sourcing** | Pulls open positions and candidates from BOSS Zhipin and sends them to the follow-up board after AI pre-scoring |
+| **Candidate follow-up** | A stage board from discovery to hire, tracking scoring, greeting, interview scheduling, interviews, and offers in one line |
 | **Bulk screening** | Screens against one consistent standard and returns a tiered shortlist |
 | **Justifying & reviewing calls** | Attaches a traceable basis to each judgment and flags uncertain points |
 | **Phone confirmation** | Transcribes recordings and organizes the key points; reviewed records export as files |
 | **Delivering results** | Produces one unified evaluation outcome and shortlist |
 | **Sharing results** | Pushes the result summary to a Feishu group when a task finishes |
+| **Attendance accounting** | Syncs Feishu check-ins automatically, matches employees, and computes attendance; only cross-day anomalies need human review |
 
 ## Current capabilities
 
@@ -70,10 +73,10 @@ Currently supported modules:
 
 | Capability | Description |
 | --- | --- |
-| **Target position** | Pick the active position from the fetched list in the Boss Connect panel; only that position's job posts, recommended candidates, and inbound messages are processed. Leave it empty to process all positions. |
+| **Target position** | Pick the active position from the fetched list in the Recruitment workbench → Outreach review panel; only that position's job posts, recommended candidates, and inbound messages are processed. Leave it empty to process all positions. |
 | **Automatic position import** | Pulls open positions on a schedule and creates a screening task with the job brief for every position seen for the first time. |
 | **Candidate sourcing** | Pulls recommended candidates for each position and drafts a "greet" outreach action. |
-| **Outreach review** | Every outbound action is drafted first. HR approves or rejects each draft in Boss Connect, or sends all pending drafts at once; a failed send records its reason without blocking the other drafts. |
+| **Outreach review** | Every outbound action is drafted first. HR approves or rejects each draft in the Recruitment workbench → Outreach review panel, or sends all pending drafts for the current target position at once; a failed send records its reason without blocking the other drafts. |
 | **Inbound message handling** | When a candidate messages you, the app auto-accepts attached-resume request cards; an attached resume the candidate already sent is downloaded instead of requested again; other messages get a drafted reply that also asks for the resume. |
 | **Attached resume retrieval** | Attached resumes from candidates are downloaded into the matching task; a contacted candidate who yields no resume for three consecutive rounds gets one "request resume" draft. |
 | **Screening hand-off** | Tasks with both a job brief and resumes start screening automatically, and S-tier candidates from a completed run enter a phone-confirmation task. |
@@ -97,11 +100,22 @@ Zhaopin is integrated through a separately deployed zhaopin-cli, which exposes t
 | **Detail reading** | `zhaopin open <name>` opens a candidate's detail panel, prints its text, and closes it again. |
 | **Greeting** | `zhaopin greet <name>` greets a candidate. The first-time greeting dialog is confirmed automatically, and candidates who were already greeted are detected and skipped. |
 | **Requesting information** | `zhaopin request <name> [resume\|phone\|wechat]` opens the chat panel to ask for an attached resume, a phone number, or a WeChat ID; the actions can be combined and default to `resume`. The phone request's method chooser is confirmed automatically. |
+| **Resume download** | `zhaopin download <name>...` and `zhaopin download-all` download every attached resume the candidate sent into `~/.zhaopin-cli/downloads/`, skipping duplicates per candidate; both the inline PDF and the `.doc` download paths are handled. |
 | **Resume analysis** | `app/connectors/zhaopin_imports.py` reads recommended candidates, captures their online resume text, stores it as Markdown, and writes it into a Talent Hub job so the existing screening pipeline (criteria → evaluation → S/A/B/C) applies unchanged. |
 | **Connector** | `app/connectors/zhaopin_cli.py` invokes these commands as a subprocess and parses the plain-text output into structured data. |
 
 > [!NOTE]
-> Zhaopin is wired into the background automation engine: pulling positions, pulling recommended candidates, greeting, and requesting attached resumes all go through a "draft first, execute after HR approval" flow. Scope it with the "Zhaopin target position" setting or the `BENATS_ZHAOPIN_TARGET_JOB` environment variable. Reading unread messages, downloading attached resumes, and auto-scoring still apply to BOSS only. Prerequisites and setup steps are in [APP_GUIDE「智联招聘」](APP_GUIDE.md#智联招聘) (Chinese).
+> Zhaopin is wired into the background automation engine: pulling positions, pulling recommended candidates, greeting, and requesting attached resumes all go through a "draft first, execute after HR approval" flow. Scope it with the "Zhaopin target position" setting or the `BENATS_ZHAOPIN_TARGET_JOB` environment variable. On the application side, reading unread messages, downloading attached resumes, and auto-scoring still apply to BOSS only (the Zhaopin CLI does provide `zhaopin download` / `download-all`; the automation engine does not use them yet). Prerequisites and setup steps are in [APP_GUIDE「智联招聘」](APP_GUIDE.md#智联招聘) (Chinese).
+
+### Candidate follow-up
+
+| Capability | Description |
+| --- | --- |
+| **Stage board** | Columns follow "to greet → greeted → to score → screening → interviewing → closed", with one card per candidate showing name, position, score tier, and reason. |
+| **AI pre-scoring** | Before greeting, the online resume is coarsely tiered against the job JD on a four-level scale (S phone contact / A interview first / B phone confirmation / C do not proceed); clear mismatches are marked skipped to avoid wasted outreach. |
+| **Bulk greeting** | Scored candidates land in the "to greet" list, where HR selects and greets them in bulk. |
+| **Stage progression** | Candidates move manually from discovery all the way to interview, offer, or rejection, persisted throughout in local SQLite. |
+| **Recruitment wizard** | A four-step wizard starts a passive-sourcing run: position & account → hiring standard → execution plan → pre-flight checks. Once the checks pass it starts, and the system pulls candidates, greets, requests resumes, and downloads and scores automatically. |
 
 ### Resume screening
 
@@ -138,6 +152,18 @@ Zhaopin is integrated through a separately deployed zhaopin-cli, which exposes t
 | **Manual resume-notification retry** | From a completed resume-screening result, click "Retry Feishu notification" to send only pending results and see whether this attempt sent anything. The phone task view has no manual retry action wired up yet; the retry capability is provided by a backend endpoint. |
 | **Test Feishu link** | Send a test message in Settings to verify Webhook connectivity. |
 
+### Attendance management
+
+| Capability | Description |
+| --- | --- |
+| **Multi-role sign-in** | A separate account system (administrator / HR / supervisor / read-only) with PBKDF2-hashed passwords; administrators and HR can edit. The default account is `admin` / `admin`, and first sign-in forces you to set a new password; no write action is possible until then. |
+| **Employee records & policies** | Employee records (employee number, name, aliases, department, position), tags, and attendance policies (standard / flexible / exempt / part-time / shift) are managed separately. |
+| **Feishu check-in import** | Imports a Feishu check-in `.xlsx`; matching prefers employee number with name / alias as fallback. Blank or `-` counts as rest, any check-in counts as attendance. |
+| **Automatic Feishu sync** | Pulls check-in results (including device check-ins) on a schedule through a Feishu custom app, with no manual Excel export; requires the "export check-in data" permission, configured under Attendance settings. |
+| **Cross-day anomaly review** | Detects cross-day candidates from "next-day" records and small-hours check-ins; a human decides whether to attribute them to the previous day or keep them on the current day. |
+| **Accounting & export** | Computes attendance days from the policy and supports manual adjustment, confirmation, rule tracing, and an Excel summary export (summary / detail / raw check-ins). |
+| **Attendance dashboard** | Supports cross-month queries and department filters, with a daily attendance-rate line chart, department comparison, and import summary. |
+
 ## Technical highlights
 
 - **Local-first**: settings, original task materials, and results are stored in the user data directory by default (Windows: `%LOCALAPPDATA%\TalentHub`; macOS: `~/.local/share/TalentHub`), which is outside the source tree. When overridden with `TALENT_HUB_DATA_DIR` or `--data-dir`, the operator chooses the location.
@@ -145,6 +171,8 @@ Zhaopin is integrated through a separately deployed zhaopin-cli, which exposes t
 - **Loopback isolation**: the service listens on `127.0.0.1` only and generates a per-session token at startup.
 - **Fairness safeguards**: model prompts prohibit using age, sex, ethnicity, place of origin, marital status, or reproductive status for evaluation or ranking. Code also filters hard requirements, A/B/C conditions, and negative signals against its built-in protected-attribute terms. These safeguards do not replace human bias review.
 - **Frontend**: React + TypeScript frontend (Vite build), served by FastAPI.
+- **SQLite storage**: attendance and candidate data persist through Python's standard-library sqlite3 (`attendance.db` and `recruitment.db`), adding no extra database dependency.
+- **Multi-role sign-in**: the attendance module ships its own account system (administrator / HR / supervisor / read-only) with PBKDF2-hashed passwords.
 - **Optional Feishu notifications**: pushes result summaries via a Feishu custom bot Webhook, with no new third-party dependency.
 - **Optional Boss Zhipin integration**: reads positions, candidates, and attached resumes through a locally deployed boss-cli (a standalone Node/TS CLI driving the local Chrome over CDP), and hands HR-approved outreach actions to it for sending. When it is missing or not signed in, only Boss Connect is unavailable; the other modules are unaffected.
 - **Optional Zhaopin integration**: reads positions, candidates, and details and performs greetings through a locally deployed zhaopin-cli (a standalone Node/TS CLI driving the local Chrome over CDP). Clicking, scrolling, and typing use native browser events rather than injected scripts. When it is missing or not signed in, only the Zhaopin commands are unavailable; the other modules are unaffected.
@@ -235,9 +263,13 @@ Phone-call transcription uses **Volcano Engine large-model speech recognition (a
 | `TALENT_HUB_API_KEY` | Injects the model API key via environment variable. On Windows, a saved key takes precedence and this variable is a fallback; on macOS, use this variable for the model key. |
 | `TALENT_HUB_ASR_API_KEY` | Injects the Volcano Engine ASR API key via environment variable; macOS uses this variable for speech-to-text. |
 | `TALENT_HUB_FEISHU_SIGN_SECRET` | Injects the Feishu bot signature secret via environment variable; the Webhook URL can still be saved in Settings. |
-| `TALENT_HUB_DATA_DIR` | Overrides the default data directory (Windows: `%LOCALAPPDATA%\TalentHub`; macOS: `~/.local/share/TalentHub`) for settings, task materials, and result files. Parsed JD text is saved. The operator is responsible for keeping a custom path outside the source tree. |
+| `TALENT_HUB_DATA_DIR` | Overrides the default data directory (Windows: `%LOCALAPPDATA%\TalentHub`; macOS: `~/.local/share/TalentHub`) for settings, task materials, result files, and the attendance / candidate SQLite databases. Parsed JD text is saved. The operator is responsible for keeping a custom path outside the source tree. |
 | `TESSERACT_CMD` | Specifies the Tesseract executable path; if unset, the app tries `PATH` and platform-specific common locations. |
 | `BOSSCLI_BIN` | Specifies the boss-cli executable path; if unset, the `boss` command on `PATH` is used. |
+| `ZHAOPINCLI_BIN` | Specifies the zhaopin-cli executable path; if unset, the `zhaopin` command on `PATH` is used. |
+| `CHROME_PATH` | Read by boss-cli / zhaopin-cli to locate the local browser executable; if unset, common install locations are probed automatically. |
+| `BENATS_TARGET_JOB` | Sets the BOSS Zhipin target position; an alternative to the "target position" selector in the UI. When both are empty, all positions are processed. |
+| `BENATS_ZHAOPIN_TARGET_JOB` | Sets the Zhaopin target position; an alternative to the "Zhaopin target position" selector in the UI. When both are empty, no position filter is applied. |
 
 ## Feishu push setup (optional)
 
@@ -291,13 +323,14 @@ The script creates `dist/TalentHub.app` and `release/<version>/macos/TalentHub-m
 - When criteria are generated, the job description is sent to the configured model service; when candidates are evaluated, parsed resume text is sent to that model service. For phone screening, original recording content is sent to Volcano Engine ASR, and the transcript is sent to the model service. Evaluate each provider's data handling and compliance before use.
 - Feishu push sends the configured message content to Feishu servers through a Webhook. Keep the Webhook URL private; the masking boundary for outbound content is described in the Feishu push setup tip.
 - With Boss Connect enabled, the app uses a signed-in BOSS Zhipin session through the local boss-cli to read open positions, candidates, and attached resumes; HR-approved outreach actions are sent to BOSS Zhipin by boss-cli in the local Chrome and go through no other third-party service. This data is likewise stored in the local data directory.
+- Attendance and candidate data are stored in local SQLite (`attendance.db`, `recruitment.db`). With automatic Feishu sync enabled, the app pulls check-in results from the Feishu attendance API as a custom enterprise app; the Feishu app secret is stored in the local SQLite database.
 - Keep manual review for critical roles, campus hires, scarce talent, and high-risk rejections.
 
 ## Project layout
 
 | Directory | Description |
 | --- | --- |
-| `app/` | FastAPI service, screening & phone pipelines, model client, runtime tools, and `connectors/` recruiting-platform integrations |
+| `app/` | FastAPI service, screening & phone pipelines, model client, runtime tools, `connectors/` recruiting-platform integrations, `attendance/` attendance management, and `recruitment/` candidate follow-up |
 | `frontend/` | React + TypeScript frontend project (Vite build) |
 | `boss-cli/` | BOSS Zhipin automation CLI source (deployed separately, invoked as a subprocess) |
 | `zhaopin-cli/` | Zhaopin automation CLI source (deployed separately, invoked as a subprocess) |

@@ -22,6 +22,7 @@ interface Account {
   role: string;
   department: string;
   is_active: boolean;
+  must_change_password: boolean;
 }
 
 interface Policy {
@@ -257,6 +258,15 @@ export function AttendanceView({ onToast }: AttendanceViewProps) {
     );
   }
 
+  // 初始密码未修改前只允许改密：写操作会被后端 403 拦截，这里先给出唯一入口
+  if (account.must_change_password) {
+    return (
+      <section id="attendanceView" className="att-view">
+        <ChangePasswordDialog forced onClose={() => void refreshAccount()} onToast={onToast} />
+      </section>
+    );
+  }
+
   const canWrite = WRITE_ROLES.has(account.role);
   const navItems: { key: AttView; label: string }[] = [
     { key: "dashboard", label: t("attNavDashboard") },
@@ -375,7 +385,15 @@ function ChangePasswordButton({ onToast }: { onToast: (m: string) => void }) {
   );
 }
 
-function ChangePasswordDialog({ onClose, onToast }: { onClose: () => void; onToast: (m: string) => void }) {
+function ChangePasswordDialog({
+  forced = false,
+  onClose,
+  onToast,
+}: {
+  forced?: boolean;
+  onClose: () => void;
+  onToast: (m: string) => void;
+}) {
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [busy, setBusy] = useState(false);
@@ -395,9 +413,10 @@ function ChangePasswordDialog({ onClose, onToast }: { onClose: () => void; onToa
     }
   };
   return (
-    <div className="att-modal-backdrop" role="presentation" onClick={onClose}>
+    <div className="att-modal-backdrop" role="presentation" onClick={forced ? undefined : onClose}>
       <div className="att-modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
-        <h3>{t("attChangePassword")}</h3>
+        <h3>{forced ? t("attMustChangePassword") : t("attChangePassword")}</h3>
+        {forced && <p className="att-modal-hint">{t("attMustChangePasswordLead")}</p>}
         <label className="field">
           <span>{t("attCurrentPassword")}</span>
           <input type="password" value={current} onChange={(e) => setCurrent(e.target.value)} />
@@ -407,9 +426,11 @@ function ChangePasswordDialog({ onClose, onToast }: { onClose: () => void; onToa
           <input type="password" value={next} onChange={(e) => setNext(e.target.value)} />
         </label>
         <div className="att-modal-actions">
-          <Button variant="secondary" onClick={onClose}>
-            {t("cancel")}
-          </Button>
+          {!forced && (
+            <Button variant="secondary" onClick={onClose}>
+              {t("cancel")}
+            </Button>
+          )}
           <Button variant="primary" busy={busy} disabled={next.length < 6} onClick={() => void submit()}>
             {t("save")}
           </Button>

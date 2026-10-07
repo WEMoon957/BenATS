@@ -101,14 +101,23 @@ POST /api/boss/outreaches                        新建触达草稿
 GET  /api/boss/outreaches                        列出未归档触达记录
 POST /api/boss/outreaches/{id}/approve           批准并发送（pending → sent / failed）
 POST /api/boss/outreaches/{id}/reject            否决（pending → rejected）
-POST /api/boss/outreaches/approve-all            按顺序发送全部待审核触达
+POST /api/boss/outreaches/approve-all            发送当前目标岗位的全部待审核触达
+GET  /api/boss/target-job                        目标岗位选择器数据（读本地缓存）
+POST /api/boss/target-job                        设置 BOSS 目标岗位
+GET  /api/zhaopin/target-job                     智联目标岗位选择器数据（读本地缓存）
+POST /api/zhaopin/target-job                     设置智联目标岗位
 GET  /api/boss/automation/status                 引擎运行状态
 POST /api/boss/automation/run                    立即执行一轮
 POST /api/boss/automation/start / stop           启动 / 停止引擎
 ```
 
-- 触达记录状态机为 `pending → approved/rejected → sent/failed`，只有 `pending` 可批准或否决，其余状态返回 409。
-- `BossCliError` 统一映射为 503，详情携带 boss-cli 的原始错误文本；发送失败写入记录的 `error` 字段，不改变筛选或电话任务状态。
+- 触达记录状态机为 `pending → sent / failed / rejected`，只有 `pending` 可批准或否决，其余状态返回 409。
+- `GET /api/boss/automation/status` 返回 `running`（轮询线程是否存活）与 `stopping`（当前轮次是否正在收尾）。
+- `stop` 会同时置位取消标记：当前轮次在**步骤边界**处收尾，不再启动新步骤。每个步骤都会驱动本机浏览器，只在方法内部的循环里检查停止会让停止后的后续步骤继续操作浏览器。当前正在执行的 CLI 调用会跑完（单次上限 180 秒）。
+- `start` 与「立即运行一轮」（`POST /api/boss/automation/run`）都会清除取消标记，因此引擎已停止时「立即运行一轮」仍能完整执行一轮。
+- `approve-all` 只发送当前目标岗位（`boss_target_job`）的待审核触达，其它岗位的草稿置为 `skipped`；返回体包含 `sent` / `failed` / `skipped` 与 `target_job`。
+- `BossCliError` 与 `ZhaopinCliError` 统一映射为 503，详情携带 CLI 的原始错误文本；发送失败写入记录的 `error` 字段，不改变筛选或电话任务状态。
+- 目标岗位选择器只读本地缓存，不调用 CLI，避免浏览器忙时下拉框取不到值。
 - 除 `/api/boss/positions` 外的端点都通过 `run_in_threadpool` 执行，避免进程调用阻塞事件循环。
 - `/api/boss/import` 与前端暂无入口，仅后端提供；界面当前只消费引擎状态与触达审核两个端点。
 
@@ -124,6 +133,59 @@ POST /api/recruitment/plans/{id}/stop            停止作业
 
 - 作业状态机为 `draft → running → stopped`；`start` 只在执行前检查全部通过后推进状态，阻塞时返回 409 与首个未通过项。
 - 启动后复用 `AutomationEngine` 的被动咨询流程，不直接调用 boss-cli 发送。
+
+### 11.7 招聘候选人与考勤端点
+
+招聘候选人（`app/recruitment/routes.py`）与评分标准（`app/main.py`），与其他 `/api/` 一样只校验 `X-App-Token`：
+
+```text
+GET    /api/recruitment/stages                       阶段枚举与中文标签
+GET    /api/recruitment/rubrics                      已保存的评分标准
+GET    /api/recruitment/candidates                   候选人列表（可按阶段筛选）
+POST   /api/recruitment/candidates                   新建候选人
+PATCH  /api/recruitment/candidates/{id}              修改候选人（阶段、备注等）
+DELETE /api/recruitment/candidates/{id}              删除候选人
+POST   /api/recruitment/candidates/greet             对候选人打招呼
+POST   /api/recruitment/candidates/score             批量预评分
+POST   /api/recruitment/candidates/{id}/call-score   写入电话确认评分
+POST   /api/rubric/generate                          按文本生成评分标准
+POST   /api/rubric/generate-by-job                   按岗位任务生成评分标准
+POST   /api/rubric/score                             按评分标准打分
+POST   /api/rubric/parse                             解析上传的评分标准文件
+POST   /api/rubric/export                            导出评分标准
+```
+
+考勤（`app/attendance/routes.py`）使用独立的账号体系，除 `login` 外的端点都要带 `X-Attendance-Token`：
+
+```text
+POST       /api/attendance/login                     登录并签发会话 token
+POST       /api/attendance/logout                    注销当前会话
+GET        /api/attendance/me                        当前账号
+POST       /api/attendance/change-password           修改密码
+GET|POST   /api/attendance/policies                  考勤规则列表 / 新建
+PUT|DELETE /api/attendance/policies/{id}             修改 / 删除
+GET|POST   /api/attendance/tags                      标签列表 / 新建
+PUT|DELETE /api/attendance/tags/{id}                 修改 / 删除
+GET|POST   /api/attendance/employees                 员工列表 / 新建
+PUT|DELETE /api/attendance/employees/{id}            修改 / 删除
+GET|POST   /api/attendance/imports                   导入批次列表 / 上传并解析打卡表
+GET        /api/attendance/imports/{id}              批次详情
+GET        /api/attendance/imports/{id}/export       导出核算表
+GET|PATCH  /api/attendance/results                   核算结果列表 / 人工调整
+POST       /api/attendance/results/{id}/approve      确认核算结果
+GET        /api/attendance/suspicions                跨日疑似列表
+POST       /api/attendance/suspicions/{id}/resolve   处理跨日疑似
+GET        /api/attendance/dashboard                 看板统计
+GET|PUT    /api/attendance/feishu-config             飞书考勤配置读取 / 保存
+POST       /api/attendance/feishu/sync               触发一次飞书打卡同步
+GET        /api/attendance/feishu/status             同步状态
+```
+
+- 考勤角色为 `admin` / `hr` / `supervisor` / `viewer`；`supervisor` 与 `viewer` 的写操作返回 403。
+- 默认管理员账号为 `admin`，初始密码为 `admin`；`account.must_change_password` 为真时所有写操作返回 403，直到 `POST /api/attendance/change-password` 成功。
+- 员工档案字段限于工号、姓名、别名、部门、岗位、入职日期、用工状态、手机号、标签与考勤策略，不保存银行卡或支付宝等支付信息。
+- 导入只接受 `.xlsx`；上传文件名先经 `safe_filename()` 消毒，再落到 `attendance_imports/<年>/<月>/`。
+- 考勤与招聘候选人状态保存在本机 SQLite（`attendance.db` / `recruitment.db`），位置由 `app_data_dir()` 决定：`--data-dir` 会同步写入 `TALENT_HUB_DATA_DIR`，使两类 SQLite 与任务仓储共用同一根目录。
 
 ## 12. 并发与持久化交叉影响
 
@@ -147,7 +209,7 @@ FastAPI 异步请求
 - 同任务简历上传锁保护 `resume_files` 和 `resume_hashes` 的读改写。
 - `JsonStore` 通过临时文件和 `os.replace` 原子写入 `job.json` / `record.json`。
 - 简历候选人检查点和最终 `评估结果.json` / `解析清单.json` 均由 `atomic_write_json()` 原子写入；Excel 也通过临时文件替换。
-- 筛选标准、解析文本、电话转写和电话摘要使用直接文件写入，不具备同样的进程中断原子性；调整保存顺序时必须单独检查恢复行为。
+- 筛选标准（`筛选标准.json` 与标准 Markdown）和电话摘要（`summaries/*.json` / `*.md`）由 `atomic_write_text()` 原子写入；解析文本与电话转写等其余文本产物使用直接文件写入，不具备同样的进程中断原子性；调整保存顺序时必须单独检查恢复行为。
 - 候选人失败隔离：单份失败不能丢失其他结果。
 - 任务级取消隔离：取消任务 A 不能中止任务 B 的模型客户端。
 - 对比缓存必须包含任务 ID 和结果文件哈希，避免跨任务污染或结果变化后返回旧排序。

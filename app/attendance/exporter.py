@@ -30,12 +30,12 @@ def build_summary_workbook(store: AttendanceStore, batch: dict) -> BytesIO:
     raw = workbook.create_sheet("原始打卡")
 
     days_in_month = calendar.monthrange(batch["year"], batch["month"])[1]
-    summary.merge_cells("A1:W1")
+    summary.merge_cells("A1:Q1")
     summary["A1"] = (
         f"{batch['month']}月份共{days_in_month}天，默认应出勤{batch['default_expected_days']}天。"
         "实际出勤由考勤策略、有效打卡和人工调整共同计算；请以核算明细为准。"
     )
-    summary.merge_cells("A2:W2")
+    summary.merge_cells("A2:Q2")
     summary["A2"] = f"西鸣科技-{batch['year']}年{batch['month']}月份考勤汇总表"
     summary["A2"].font = Font(size=16, bold=True)
 
@@ -52,26 +52,18 @@ def build_summary_workbook(store: AttendanceStore, batch: dict) -> BytesIO:
         "J3:J4": "加班时长\n（单位：天）",
         "K3:K4": "实际出勤天数",
         "P3:P4": "手机号码",
-        "W3:W4": "核算备注",
+        "Q3:Q4": "核算备注",
     }
     for address, label in vertical_headers.items():
         summary.merge_cells(address)
         summary[address.split(":")[0]] = label
     summary.merge_cells("L3:O3")
     summary["L3"] = "考勤【主管核对】"
-    summary.merge_cells("Q3:V3")
-    summary["Q3"] = "银行卡信息"
     row4_headers = {
         "L4": "迟到/次",
         "M4": "旷工/次",
         "N4": "缺卡/次",
         "O4": "扣款",
-        "Q4": "银行名称",
-        "R4": "开户人",
-        "S4": "开户省份",
-        "T4": "开户行",
-        "U4": "银行卡号",
-        "V4": "支付宝账号",
     }
     for cell, value in row4_headers.items():
         summary[cell] = value
@@ -84,9 +76,7 @@ def build_summary_workbook(store: AttendanceStore, batch: dict) -> BytesIO:
 
     results = store.query(
         "SELECT r.*, e.employee_no AS emp_no, e.name AS emp_name, e.department, e.position, "
-        "e.join_date, e.employment_status, e.phone, e.bank_name, e.bank_account_holder, "
-        "e.bank_province, e.bank_branch, e.bank_card_number, e.alipay_account, "
-        "p.mode AS policy_mode "
+        "e.join_date, e.employment_status, e.phone, p.mode AS policy_mode "
         "FROM attendance_result r "
         "JOIN employee e ON e.id = r.employee_id "
         "LEFT JOIN attendance_policy p ON p.id = e.attendance_policy_id "
@@ -140,12 +130,6 @@ def build_summary_workbook(store: AttendanceStore, batch: dict) -> BytesIO:
                 result["missing_punch_count"] or None,
                 float(result["deduction"]) or None,
                 result["phone"],
-                result["bank_name"],
-                result["bank_account_holder"],
-                result["bank_province"],
-                result["bank_branch"],
-                result["bank_card_number"],
-                result["alipay_account"],
                 result["note"],
             ]
         )
@@ -194,20 +178,20 @@ def _style_summary(sheet, max_row):
         cell.fill = title_fill
         cell.alignment = Alignment(horizontal="center", vertical="center")
     sheet["A2"].alignment = Alignment(horizontal="center", vertical="center")
-    for row in sheet.iter_rows(min_row=3, max_row=4, min_col=1, max_col=23):
+    for row in sheet.iter_rows(min_row=3, max_row=4, min_col=1, max_col=17):
         for cell in row:
             cell.fill = header_fill
             cell.font = Font(bold=True, color="1E293B")
             cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
             cell.border = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
-    for row in sheet.iter_rows(min_row=5, max_row=max_row, min_col=1, max_col=23):
+    for row in sheet.iter_rows(min_row=5, max_row=max_row, min_col=1, max_col=17):
         for cell in row:
             cell.border = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
             cell.alignment = Alignment(
                 vertical="center",
-                horizontal="left" if cell.column in {2, 3, 4, 20, 23} else "center",
+                horizontal="left" if cell.column in {2, 3, 4, 17} else "center",
             )
-    widths = [7, 15, 18, 11, 13, 11, 12, 11, 11, 13, 14, 9, 9, 9, 11, 15, 15, 12, 12, 30, 24, 20, 30]
+    widths = [7, 15, 18, 11, 13, 11, 12, 11, 11, 13, 14, 9, 9, 9, 11, 15, 30]
     for index, width in enumerate(widths, start=1):
         sheet.column_dimensions[get_column_letter(index)].width = width
     sheet.row_dimensions[1].height = 28
