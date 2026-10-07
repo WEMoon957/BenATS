@@ -1,8 +1,8 @@
 <p align="center" style="margin-bottom: 6px;">
-  <img src="assets/app-icon-logo.png" alt="Talent Hub logo" width="120" />
+  <img src="assets/app-icon-logo.png" alt="BenATS logo" width="120" />
 </p>
 
-<h1 align="center" style="margin-top: 0;">Talent Hub</h1>
+<h1 align="center" style="margin-top: 0;">BenATS</h1>
 
 <p align="center">
   <em>A local-first, evidence-driven AI HR workbench covering the full hiring flow and attendance accounting: from sourcing on BOSS Zhipin and AI pre-scoring through resume screening, phone confirmation, and candidate follow-up, plus automatic Feishu check-in sync and accounting — so every judgment has a traceable basis.</em>
@@ -50,11 +50,11 @@
 
 The three most repetitive parts of hiring, and the ones whose judgment is easiest to distort by inconsistent standards: bulk resume screening, justifying and reviewing calls, and organizing phone recordings plus consolidating results. Attendance accounting is the fourth: matching monthly Feishu check-ins to employees and computing attendance.
 
-Talent Hub runs hiring as one trackable funnel — source → pre-score → greet → collect resumes → screen → phone confirmation → interview → offer — and automates attendance accounting, leaving a verifiable basis for each step and making results ready to deliver. Settings, task materials, and results are stored locally by default; when model, ASR, or Feishu features are used, the corresponding content is sent to the configured service.
+BenATS runs hiring as one trackable funnel — source → pre-score → greet → collect resumes → screen → phone confirmation → interview → offer — and automates attendance accounting, leaving a verifiable basis for each step and making results ready to deliver. Settings, task materials, and results are stored locally by default; when model, ASR, or Feishu features are used, the corresponding content is sent to the configured service.
 
 ## HR productivity scenarios
 
-| Step | How Talent Hub handles it |
+| Step | How BenATS handles it |
 | --- | --- |
 | **Candidate sourcing** | Pulls open positions and candidates from BOSS Zhipin and sends them to the follow-up board after AI pre-scoring |
 | **Candidate follow-up** | A stage board from discovery to hire, tracking scoring, greeting, interview scheduling, interviews, and offers in one line |
@@ -101,7 +101,7 @@ Zhaopin is integrated through a separately deployed zhaopin-cli, which exposes t
 | **Greeting** | `zhaopin greet <name>` greets a candidate. The first-time greeting dialog is confirmed automatically, and candidates who were already greeted are detected and skipped. |
 | **Requesting information** | `zhaopin request <name> [resume\|phone\|wechat]` opens the chat panel to ask for an attached resume, a phone number, or a WeChat ID; the actions can be combined and default to `resume`. The phone request's method chooser is confirmed automatically. |
 | **Resume download** | `zhaopin download <name>...` and `zhaopin download-all` download every attached resume the candidate sent into `~/.zhaopin-cli/downloads/`, skipping duplicates per candidate; both the inline PDF and the `.doc` download paths are handled. |
-| **Resume analysis** | `app/connectors/zhaopin_imports.py` reads recommended candidates, captures their online resume text, stores it as Markdown, and writes it into a Talent Hub job so the existing screening pipeline (criteria → evaluation → S/A/B/C) applies unchanged. |
+| **Resume analysis** | `app/connectors/zhaopin_imports.py` reads recommended candidates, captures their online resume text, stores it as Markdown, and writes it into a BenATS job so the existing screening pipeline (criteria → evaluation → S/A/B/C) applies unchanged. |
 | **Connector** | `app/connectors/zhaopin_cli.py` invokes these commands as a subprocess and parses the plain-text output into structured data. |
 
 > [!NOTE]
@@ -275,7 +275,7 @@ Phone-call transcription uses **Volcano Engine large-model speech recognition (a
 
 When enabled, each resume-screening run pushes one business overview, while phone screening pushes one organized record per candidate. Appended work notifies only new results that have not been pushed successfully; a full re-screen after criteria changes is notified as a new version.
 
-The bot-creation labels below belong to Feishu and may vary with its client interface. Talent Hub only consumes the resulting Webhook URL and optional signature secret.
+The bot-creation labels below belong to Feishu and may vary with its client interface. BenATS only consumes the resulting Webhook URL and optional signature secret.
 
 1. In the Feishu desktop client, open the target group → top-right settings → Group bots → Add bot → **Custom bot** → set a name and add it.
 2. Copy the generated **Webhook URL** (e.g. `https://open.feishu.cn/open-apis/bot/v2/hook/xxxx`).
@@ -284,8 +284,8 @@ The bot-creation labels below belong to Feishu and may vary with its client inte
 > [!TIP]
 >
 > - If signature verification is not enabled, leave the signature secret blank. If it is enabled, enter the generated secret in "Feishu push · Signature secret" on Windows; on macOS, set `TALENT_HUB_FEISHU_SIGN_SECRET` before launch.
-> - Talent Hub does not automatically insert custom keywords or adapt to an IP allowlist. Before enabling either Feishu-side rule, ensure that the app's messages and request source satisfy it.
-> - Resume messages contain statistics, candidate names, conclusions, and one-line judgments. Phone messages contain the organized record shown in the app, but do not separately append the raw transcript, facts list, or citation fields. Oversized phone messages are truncated with a prompt to view the full record in Talent Hub.
+> - BenATS does not automatically insert custom keywords or adapt to an IP allowlist. Before enabling either Feishu-side rule, ensure that the app's messages and request source satisfy it.
+> - Resume messages contain statistics, candidate names, conclusions, and one-line judgments. Phone messages contain the organized record shown in the app, but do not separately append the raw transcript, facts list, or citation fields. Oversized phone messages are truncated with a prompt to view the full record in BenATS.
 > - Before sending, the app replaces common mobile-number, landline, and email formats. Unusual formats may not be detected, so confirm that the message content is suitable for the target group before enabling push.
 
 ## Windows build
