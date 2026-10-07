@@ -1,5 +1,5 @@
 {
-  "name": "@talent-hub/zhaopin-cli",
+  "name": "@wemoon/zhaopin-cli",
   "version": "0.1.0",
   "description": "智联招聘自动化 CLI：职位切换、候选人读取、详情抓取与打招呼。基于 Puppeteer/CDP 驱动本机 Chrome，供 Talent Hub 以子进程方式调用",
   "keywords": [
@@ -12,15 +12,31 @@
     "cdp",
     "cli"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/WEMoon957/BenATS.git",
+    "directory": "zhaopin-cli"
+  },
+  "homepage": "https://github.com/WEMoon957/BenATS/tree/main/zhaopin-cli",
   "type": "module",
   "main": "dist/cli/index.js",
   "bin": {
     "zhaopin": "dist/cli/index.js"
   },
+  "files": [
+    "dist",
+    "scripts",
+    "README.md",
+    "HR使用说明.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node -e \"require('fs').chmodSync('dist/cli/index.js', 0o755)\"",
     "dev": "npm run build && node dist/cli/index.js",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepare": "npm run build"
   },
   "dependencies": {
     "puppeteer-core": "^24.29.1"
@@ -29,5 +45,8 @@
     "@types/node": "^24.10.0",
     "typescript": "^5.3.3"
   },
-  "private": true
+  "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public"
+  }
 }

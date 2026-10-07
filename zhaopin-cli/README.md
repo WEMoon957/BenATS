@@ -9,7 +9,7 @@
 前置条件：Node.js ≥ 20，本机已安装 Chrome 或 Edge。CLI 会自动探测浏览器的常见安装位置，也可以设置 `CHROME_PATH` 指定可执行文件。
 
 ```bash
-npm install -g @joohw/zhaopin-cli@latest
+npm install -g @wemoon/zhaopin-cli@latest
 zhaopin help
 ```
 
@@ -111,7 +111,7 @@ node scripts/self-check.mjs
 全局安装（`npm install -g`）时脚本随包一起发布，用 `npm root -g` 定位：
 
 ```bash
-node "$(npm root -g)/@joohw/zhaopin-cli/scripts/self-check.mjs"
+node "$(npm root -g)/@wemoon/zhaopin-cli/scripts/self-check.mjs"
 ```
 
 脚本会逐项检查 Node 版本、浏览器可执行文件、数据目录写入、智联域名可达性，以及浏览器能否启动并建立 CDP 连接。任一项失败都会给出具体原因。
@@ -126,9 +126,11 @@ npm run build        # 构建
 npm run dev -- --help
 ```
 
+`build` 在 `tsc` 之后会补上 `dist/cli/index.js` 的执行位。`bin` 入口靠 shebang 启动，缺少执行位时全局命令会报 `permission denied`。
+
 ## 发布
 
-包名 `@joohw/zhaopin-cli`，发布到公共 npm registry，发布后任何人无需账号即可 `npm install -g` 安装。
+包名 `@wemoon/zhaopin-cli`，发布到公共 npm registry，发布后任何人无需账号即可 `npm install -g` 安装。
 
 ```bash
 npm login            # 需要 @joohw scope 的发布权限
