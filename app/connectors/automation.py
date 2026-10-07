@@ -201,23 +201,27 @@ class AutomationEngine:
         self.interval = interval_seconds
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        # 当前轮次的取消标记：与 _stop 分开，因为「立即运行一轮」在引擎停止时仍应完整执行一轮
+        self._abort_round = threading.Event()
         # 同一时刻只允许一轮：后台轮询与「运行一轮」并发会同时驱动浏览器，互相抢会话锁
         self._round_lock = threading.Lock()
 
     @property
     def stopping(self) -> bool:
-        """是否已收到停止请求；轮内各步骤据此及时收尾，避免一整轮跑十几分钟停不下来。"""
-        return self._stop.is_set()
+        """当前轮次是否已被要求取消；轮内各步骤据此在边界处收尾，停止后不再启动新步骤。"""
+        return self._abort_round.is_set()
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
             return
         self._stop.clear()
+        self._abort_round.clear()
         self._thread = threading.Thread(target=self._loop, daemon=True, name="boss-automation")
         self._thread.start()
 
     def stop(self) -> None:
         self._stop.set()
+        self._abort_round.set()
 
     @property
     def running(self) -> bool:
@@ -249,23 +253,31 @@ class AutomationEngine:
                 logger.exception("自动化引擎一轮执行失败")
             self._stop.wait(self.interval)
 
-    def run_once(self) -> dict:
+    def run_once(self, *, manual: bool = False) -> dict:
         if not self._round_lock.acquire(blocking=False):
             logger.info("已有自动化轮次在执行，本次跳过")
             return {"skipped": "busy"}
+        if manual:
+            # 手动触发的一轮是显式意图：清掉此前的取消标记，让它完整执行
+            self._abort_round.clear()
         try:
+            def step(fn):
+                # 每个步骤都会驱动本机浏览器。停止请求到达后不再启动新步骤；
+                # 只靠方法内部的循环检查会让后续步骤继续逐个驱动浏览器。
+                return 0 if self.stopping else fn()
+
             summary = {
-                "positions_created": self.sync_positions(),
-                "outreaches_created": self.sync_candidates(),
-                "zhaopin_positions_created": self.sync_zhaopin_positions(),
-                "zhaopin_outreaches_created": self.sync_zhaopin_candidates(),
-                "inbound_created": self.sync_inbound(),
-                "resume_requests_accepted": self.auto_accept_resumes(),
-                "outreaches_reconciled": self.sync_outreach_results(),
-                "resumes_downloaded": self.sync_resumes(),
-                "candidates_scored": self.sync_scoring(),
-                "jobs_started": self.start_ready_jobs(),
-                "s_calls_synced": self.sync_s_calls(),
+                "positions_created": step(self.sync_positions),
+                "outreaches_created": step(self.sync_candidates),
+                "zhaopin_positions_created": step(self.sync_zhaopin_positions),
+                "zhaopin_outreaches_created": step(self.sync_zhaopin_candidates),
+                "inbound_created": step(self.sync_inbound),
+                "resume_requests_accepted": step(self.auto_accept_resumes),
+                "outreaches_reconciled": step(self.sync_outreach_results),
+                "resumes_downloaded": step(self.sync_resumes),
+                "candidates_scored": step(self.sync_scoring),
+                "jobs_started": step(self.start_ready_jobs),
+                "s_calls_synced": step(self.sync_s_calls),
             }
         finally:
             self._round_lock.release()

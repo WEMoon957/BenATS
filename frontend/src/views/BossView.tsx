@@ -8,6 +8,7 @@ import { StatusDot } from "../ui/StatusDot";
 
 interface AutomationStatus {
   running: boolean;
+  stopping: boolean;
 }
 
 interface OutreachAction {
@@ -74,6 +75,7 @@ function actionDetail(action: OutreachAction): string {
 
 export function BossView({ onToast }: BossViewProps) {
   const [running, setRunning] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const [outreaches, setOutreaches] = useState<OutreachRecord[]>([]);
   const [candidates, setCandidates] = useState<{ stage: string }[]>([]);
   const [targetJob, setTargetJob] = useState("");
@@ -96,6 +98,7 @@ export function BossView({ onToast }: BossViewProps) {
         api<BossPositions>("/api/zhaopin/target-job"),
       ]);
       setRunning(status.running);
+      setStopping(Boolean(status.stopping));
       setOutreaches(list.outreaches || []);
       setCandidates(cands.candidates || []);
       setTargetJob(jobInfo.target_job || "");
@@ -224,14 +227,23 @@ export function BossView({ onToast }: BossViewProps) {
         <div className="subsection-heading">
           <h3>{t("bossAutomation")}</h3>
           <span className="boss-engine-state">
-            <StatusDot status={running ? "ready" : "error"} />
-            {running ? t("bossEngineRunning") : t("bossEngineStopped")}
+            <StatusDot status={running && !stopping ? "ready" : "error"} />
+            {running
+              ? stopping
+                ? t("bossEngineStopping")
+                : t("bossEngineRunning")
+              : t("bossEngineStopped")}
           </span>
         </div>
         <p className="boss-lead">{t("bossAutomationLead")}</p>
         <div className="boss-actions">
-          <Button variant="primary" busy={loading} onClick={() => void toggleEngine()}>
-            {running ? t("bossStop") : t("bossStart")}
+          <Button
+            variant="primary"
+            busy={loading}
+            disabled={stopping}
+            onClick={() => void toggleEngine()}
+          >
+            {running ? (stopping ? t("bossEngineStopping") : t("bossStop")) : t("bossStart")}
           </Button>
           <Button variant="secondary" disabled={loading} onClick={() => void runOnce()}>
             {t("bossRunOnce")}

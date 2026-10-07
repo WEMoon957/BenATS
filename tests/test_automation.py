@@ -353,6 +353,31 @@ def test_stop_interrupts_resume_download_loop(tmp_path):
     assert attempted == []
 
 
+def test_stop_prevents_further_steps_in_round(tmp_path):
+    """停止请求到达后，run_once 不再启动任何步骤，避免后续步骤继续驱动本机浏览器。"""
+    boss = FakeBoss([{"name": "招聘专员", "status": "开放中"}], {"招聘专员": "# 招聘专员"}, {}, {})
+    repository, _, store, automation = build(tmp_path, boss, FakeEngine())
+
+    automation.stop()
+    summary = automation.run_once()
+
+    assert set(summary.values()) == {0}
+    assert repository.list_jobs(archived=False) == []
+    assert store.list_positions() == {}
+
+
+def test_manual_run_executes_a_full_round_after_stop(tmp_path):
+    """「立即运行一轮」是显式意图：引擎已停止时仍应完整执行一轮。"""
+    boss = FakeBoss([{"name": "招聘专员", "status": "开放中"}], {"招聘专员": "# 招聘专员"}, {}, {})
+    repository, _, _, automation = build(tmp_path, boss, FakeEngine())
+
+    automation.stop()
+    summary = automation.run_once(manual=True)
+
+    assert summary["positions_created"] == 1
+    assert len(repository.list_jobs(archived=False)) == 1
+
+
 def test_inbound_creates_reply_draft_for_matched_position_and_dedupes(tmp_path):
     boss = FakeBoss(
         [{"name": "前端工程师", "status": "开放中"}],
