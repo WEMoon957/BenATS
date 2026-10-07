@@ -168,12 +168,14 @@ function CandidateCard({
             aria-label={candidate.name}
           />
         )}
+        <span className="rec-avatar" aria-hidden="true">{candidate.name.trim().charAt(0) || "?"}</span>
         <strong>{candidate.name}</strong>
         {candidate.pre_score && <span className="rec-score">{candidate.pre_score}</span>}
         {detail && <span className="rec-score rec-score-total">{String(detail.total ?? "")}</span>}
       </div>
       <div className="rec-card-meta">
-        <span>{candidate.job_keyword || "未关联岗位"}</span>
+        <span className="rec-chip">{candidate.job_keyword || "未关联岗位"}</span>
+        {candidate.phone && <span className="rec-chip is-phone">{candidate.phone}</span>}
       </div>
       {candidate.pre_score_reason && <p className="rec-card-reason">{candidate.pre_score_reason}</p>}
       {open && detail && (
