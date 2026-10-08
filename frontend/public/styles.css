@@ -1009,6 +1009,7 @@ html:has(.preview-backdrop) {
 .hr-panel { margin-bottom: 0; }
 .hr-panel .subsection-heading + .subsection-heading { margin-top: 18px; }
 .hr-period { margin: 0; color: var(--muted); font-size: 12px; }
+.hr-sync { display: flex; align-items: center; gap: 12px; margin-top: 12px; flex-wrap: wrap; }
 .hr-center-view .att-kpis { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
 
 /* ---- 触达方案概览 ---- */

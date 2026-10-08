@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "../api/client";
 import { t } from "../i18n";
 import { registerView } from "../router";
+import { Button } from "../ui/Button";
 
 interface DepartmentCount {
   department: string;
@@ -36,10 +37,24 @@ interface RecruitmentSummary {
   stages: StageCount[];
 }
 
+interface EmployeeSync {
+  at: string;
+  total: number;
+  inserted: number;
+  updated: number;
+  skipped: number;
+}
+
+interface FeishuSummary {
+  credentials_configured: boolean;
+  employee_sync: EmployeeSync | null;
+}
+
 interface HrDashboard {
   employees: EmployeesSummary;
   attendance: AttendanceSummary;
   recruitment: RecruitmentSummary;
+  feishu: FeishuSummary;
 }
 
 export interface HRCenterViewProps {
@@ -67,6 +82,7 @@ function CountBars({ items }: { items: { label: string; count: number }[] }) {
 
 export function HRCenterView({ onToast }: HRCenterViewProps) {
   const [data, setData] = useState<HrDashboard | null>(null);
+  const [syncing, setSyncing] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -75,6 +91,26 @@ export function HRCenterView({ onToast }: HRCenterViewProps) {
       onToast((error as Error).message);
     }
   }, [onToast]);
+
+  /** 按飞书通讯录刷新员工档案：同步成功后重新拉看板，让员工与部门分布即时反映结果。 */
+  const syncEmployees = useCallback(async () => {
+    setSyncing(true);
+    try {
+      const result = await api<EmployeeSync>("/api/hr/feishu-employees/sync", { method: "POST" });
+      await load();
+      onToast(
+        t("hrFeishuSyncDone", {
+          inserted: result.inserted,
+          updated: result.updated,
+          skipped: result.skipped,
+        })
+      );
+    } catch (error) {
+      onToast((error as Error).message);
+    } finally {
+      setSyncing(false);
+    }
+  }, [load, onToast]);
 
   useEffect(() => {
     registerView("hrcenter", { enter: () => void load() });
@@ -100,6 +136,8 @@ export function HRCenterView({ onToast }: HRCenterViewProps) {
     pending_cross_day: 0,
   };
   const recruitment = data.recruitment ?? { candidates: 0, jobs: 0, stages: [] };
+  const feishu = data.feishu ?? { credentials_configured: false, employee_sync: null };
+  const lastSync = feishu.employee_sync;
 
   return (
     <section id="hrCenterView" className="hr-center-view">
@@ -117,6 +155,22 @@ export function HRCenterView({ onToast }: HRCenterViewProps) {
               <span className="att-kpi-value">{employees.total}</span>
               <span className="att-kpi-label">{t("hrTotalEmployees")}</span>
             </div>
+          </div>
+          <div className="hr-sync">
+            <Button variant="secondary" busy={syncing} onClick={() => void syncEmployees()}>
+              {syncing ? t("hrFeishuSyncing") : t("hrFeishuSyncEmployees")}
+            </Button>
+            <p className="hr-period">
+              {t("hrFeishuLastSync")}：
+              {lastSync
+                ? t("hrFeishuSyncSummary", {
+                    at: lastSync.at,
+                    inserted: lastSync.inserted,
+                    updated: lastSync.updated,
+                    skipped: lastSync.skipped,
+                  })
+                : t("hrFeishuNeverSynced")}
+            </p>
           </div>
           <div className="subsection-heading">
             <h3>{t("hrDepartments")}</h3>

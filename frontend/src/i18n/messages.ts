@@ -447,7 +447,13 @@ export const messages: Record<"zh-CN" | "en", Record<string, string>> = {
     "hrJobs": "筛选任务",
     "hrStages": "候选人阶段",
     "hrLoading": "加载中…",
-    "hrNoData": "暂无数据"
+    "hrNoData": "暂无数据",
+    "hrFeishuSyncEmployees": "从飞书同步员工",
+    "hrFeishuSyncing": "同步中…",
+    "hrFeishuLastSync": "最近同步",
+    "hrFeishuNeverSynced": "尚未从飞书同步",
+    "hrFeishuSyncSummary": "{at} · 新增 {inserted} · 更新 {updated} · 跳过 {skipped}",
+    "hrFeishuSyncDone": "同步完成：新增 {inserted} · 更新 {updated} · 跳过 {skipped}"
   },
   "en": {
     "documentTitle": "Talent Hub | Evidence-led screening",
@@ -896,6 +902,12 @@ export const messages: Record<"zh-CN" | "en", Record<string, string>> = {
     "hrJobs": "Screening jobs",
     "hrStages": "Candidate stages",
     "hrLoading": "Loading…",
-    "hrNoData": "No data"
+    "hrNoData": "No data",
+    "hrFeishuSyncEmployees": "Sync employees from Feishu",
+    "hrFeishuSyncing": "Syncing…",
+    "hrFeishuLastSync": "Last sync",
+    "hrFeishuNeverSynced": "Not synced from Feishu yet",
+    "hrFeishuSyncSummary": "{at} · {inserted} added · {updated} updated · {skipped} skipped",
+    "hrFeishuSyncDone": "Sync finished: {inserted} added · {updated} updated · {skipped} skipped"
   }
 };

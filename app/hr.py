@@ -1,13 +1,21 @@
 """人事中台看板：聚合员工、考勤与招聘三类摘要，供前端一览页渲染。
 
-数据全部来自本地存储（考勤 attendance.db 与招聘 recruitment.db），
-不依赖飞书运行时同步；看板是只读概览，不涉及考勤独立账号体系。
+看板数据全部来自本地存储（考勤 attendance.db 与招聘 recruitment.db），
+不涉及考勤独立账号体系；「从飞书同步员工」是唯一写入口，按飞书通讯录刷新员工档案。
 """
 
 from __future__ import annotations
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from fastapi.concurrency import run_in_threadpool
 
+from .attendance.feishu_contacts import (
+    FeishuContactsClient,
+    FeishuContactsError,
+    last_sync,
+    sync_employees,
+)
+from .attendance.sync import CONFIG_APP_ID, CONFIG_APP_SECRET
 from .recruitment.db import STAGE_LABELS
 
 
@@ -22,6 +30,14 @@ def register_hr_routes(app: FastAPI, attendance_store, recruitment_store, reposi
             "COUNT(*) AS c FROM employee GROUP BY department ORDER BY department"
         )
         departments = [{"department": row["department"], "count": row["c"]} for row in dept_rows]
+
+        # ---- 飞书员工同步状态 ----
+        feishu = {
+            "credentials_configured": bool(
+                attendance_store.get_config(CONFIG_APP_ID) and attendance_store.get_config(CONFIG_APP_SECRET)
+            ),
+            "employee_sync": last_sync(attendance_store),
+        }
 
         # ---- 考勤汇总（最近一个已完成批次） ----
         latest = attendance_store.query_one(
@@ -68,4 +84,20 @@ def register_hr_routes(app: FastAPI, attendance_store, recruitment_store, reposi
             "employees": {"total": total, "active": active, "departments": departments},
             "attendance": attendance,
             "recruitment": {"candidates": candidates, "jobs": jobs, "stages": stages},
+            "feishu": feishu,
         }
+
+    @app.post("/api/hr/feishu-employees/sync")
+    async def sync_feishu_employees():
+        app_id = attendance_store.get_config(CONFIG_APP_ID)
+        app_secret = attendance_store.get_config(CONFIG_APP_SECRET)
+        if not app_id or not app_secret:
+            raise HTTPException(
+                status_code=400,
+                detail="尚未配置飞书应用凭证，请先在「考勤管理 → 设置」中填写 App ID 与 App Secret",
+            )
+        client = FeishuContactsClient(app_id, app_secret)
+        try:
+            return await run_in_threadpool(sync_employees, attendance_store, client)
+        except FeishuContactsError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc

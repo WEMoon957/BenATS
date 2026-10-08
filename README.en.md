@@ -167,16 +167,17 @@ Zhaopin is integrated through a separately deployed zhaopin-cli, which exposes t
 
 ### HR center
 
-Open it from the "HR center" entry in the top-bar "New" tool strip for a single-screen view of the HR picture. The dashboard is read-only: every figure comes from the local attendance and recruitment stores, and it triggers no sync or write.
+Open it from the "HR center" entry in the top-bar "New" tool strip for a single-screen view of the HR picture. Every figure comes from the local attendance and recruitment stores.
 
 | Capability | Description |
 | --- | --- |
-| **Employee info** | Active and total employee counts plus a department distribution bar chart, taken from the attendance employee records. |
+| **Sync employees from Feishu** | Refreshes employee records from the Feishu directory in one click: the department tree and members come from Feishu, and records are created or updated by employee number with name, department, position, mobile, join date, and employment status. Aliases, tags, attendance policies, and expected-day overrides keep their local values. Requires the `contact:contact.base:readonly` permission on the Feishu app, followed by a republish. |
+| **Employee info** | Active and total employee counts plus a department distribution bar chart, taken from the attendance employee records, which can be written by the Feishu sync or maintained by hand under Attendance management → Employees. |
 | **Attendance summary** | Attendance rate, items to review, and cross-day candidates for the most recent completed batch, labelled with its period; when no batch is completed it reports that no attendance data is available. |
 | **Recruitment progress** | Candidate total, screening-task count, and the candidate stage distribution. |
 
 > [!NOTE]
-> The HR center reuses the application session token and adds no separate account system; attendance detail and manual review stay in Attendance management.
+> The HR center reuses the application session token and adds no separate account system; the Feishu app credentials are shared with Attendance management → Settings, and attendance detail plus manual review stay in Attendance management.
 
 ## Technical highlights
 
