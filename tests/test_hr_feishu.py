@@ -331,6 +331,8 @@ def test_sync_employees_inserts_new_members_and_skips_missing_employee_no(tmp_pa
     assert summary["inserted"] == 2
     assert summary["updated"] == 0
     assert summary["skipped"] == 1
+    assert summary["skipped_missing_employee_no"] == 1
+    assert summary["skipped_missing_name"] == 0
     assert last_sync(store) == summary
 
     rows = {row["employee_no"]: row for row in store.query("SELECT * FROM employee")}
@@ -345,7 +347,7 @@ def test_sync_employees_inserts_new_members_and_skips_missing_employee_no(tmp_pa
 
 
 def test_sync_employees_reports_when_every_member_lacks_employee_no(tmp_path):
-    """成员全缺工号时不写空摘要，而是提示字段权限与数据本身都要检查。"""
+    """成员有姓名但都没工号时，指向飞书资料缺工号，而不是让用户去查字段权限。"""
     store = _store(tmp_path)
     members = [{"open_id": "ou-1", "name": "张三", "employee_no": "", "department_ids": [], "status": {}}]
 
@@ -359,9 +361,28 @@ def test_sync_employees_reports_when_every_member_lacks_employee_no(tmp_path):
     with pytest.raises(FeishuContactsError) as excinfo:
         sync_employees(store, _client(handler))
 
-    assert "contact:user.base:readonly" in str(excinfo.value)
+    assert "补齐工号" in str(excinfo.value)
     assert store.query("SELECT * FROM employee") == []
     assert last_sync(store) is None
+
+
+def test_sync_employees_reports_missing_name_as_field_permission_problem(tmp_path):
+    """连姓名都读不到，指向字段权限没开齐。"""
+    store = _store(tmp_path)
+    members = [{"open_id": "ou-1", "name": "", "employee_no": "E001", "department_ids": [], "status": {}}]
+
+    def handler(request):
+        if request.url.path == TOKEN_PATH:
+            return _token_response()
+        if _children_department(request.url.path) is not None:
+            return httpx.Response(200, json={"code": 0, "data": {"items": [], "has_more": False}})
+        return httpx.Response(200, json={"code": 0, "data": {"items": members, "has_more": False}})
+
+    with pytest.raises(FeishuContactsError) as excinfo:
+        sync_employees(store, _client(handler))
+
+    assert "contact:user.base:readonly" in str(excinfo.value)
+    assert "字段权限" in str(excinfo.value)
 
 
 def test_sync_employees_refreshes_feishu_fields_and_keeps_local_only_fields(tmp_path):

@@ -253,11 +253,17 @@ def sync_employees(store, client: FeishuContactsClient) -> dict:
     inserted = 0
     updated = 0
     skipped = 0
+    missing_no = 0
+    missing_name = 0
     for item in employees:
         employee_no = item["employee_no"]
         # 工号是 employee 表的唯一键，也是飞书考勤按工号取数的前提，缺则不入库
         if not employee_no or not item["name"]:
             skipped += 1
+            if item["name"]:
+                missing_no += 1
+            else:
+                missing_name += 1
             continue
         existing = store.query_one(
             "SELECT id, employment_status FROM employee WHERE employee_no = ?", (employee_no,)
@@ -300,19 +306,29 @@ def sync_employees(store, client: FeishuContactsClient) -> dict:
                 ),
             )
             inserted += 1
-    # 成员全部缺工号或姓名时基本是字段权限没开齐，直接给出可执行的提示而不是记一条空摘要
+    # 一条都没写成时按真实原因给提示：读不到姓名多半是字段权限没开齐，
+    # 有姓名却没工号则是飞书里的成员资料缺工号，两者的处理动作完全不同。
     if employees and not inserted and not updated:
-        raise FeishuContactsError(
-            "no_employee_no",
-            f"飞书返回的 {len(employees)} 名成员都没有工号或姓名，无法按工号建档："
-            f"请在飞书补齐成员的工号与姓名，并确认应用已开通 {'、'.join(CONTACTS_SCOPES)}（工号与姓名属于字段权限）",
-        )
+        if missing_name:
+            detail = (
+                f"飞书返回的 {len(employees)} 名成员里有 {missing_name} 名读不到姓名："
+                f"请确认应用已开通 {'、'.join(CONTACTS_SCOPES)} 这些字段权限，并已重新发布应用"
+            )
+        else:
+            detail = (
+                f"飞书返回的 {len(employees)} 名成员都没有工号：员工档案以工号为唯一键，"
+                "请在飞书管理后台为成员补齐工号后重试"
+            )
+        raise FeishuContactsError("no_employee_no", detail)
     summary = {
         "at": _now(),
         "total": len(employees),
         "inserted": inserted,
         "updated": updated,
         "skipped": skipped,
+        # 跳过原因分开记，便于区分「飞书没填工号」与「字段权限没开」
+        "skipped_missing_employee_no": missing_no,
+        "skipped_missing_name": missing_name,
     }
     store.set_config(CONFIG_LAST_SYNC, json.dumps(summary, ensure_ascii=False))
     return summary
