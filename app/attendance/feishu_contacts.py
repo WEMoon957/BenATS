@@ -34,9 +34,15 @@ TOKEN_REFRESH_MARGIN = 120
 SCOPE_DENIED_CODE = 99991672
 # 部门不在应用通讯录权限范围内；查询根部门要求权限范围为全部成员
 SCOPE_RANGE_CODES = {40004, 40014}
-# 既覆盖通讯录接口权限，也覆盖工号、姓名、部门、入职时间与职务等字段权限
-CONTACTS_SCOPE = "contact:contact:readonly"
-# 手机号是独立的字段权限，不随通讯录权限一并返回
+# 通讯录权限在开放平台按字段细分，宽泛的 contact:contact:readonly 已不可开通，
+# 需要逐项申请字段权限；这里列出读取员工档案所需的项。
+CONTACTS_SCOPES = (
+    "contact:user.base:readonly",
+    "contact:user.employee:readonly",
+    "contact:user.department:readonly",
+    "contact:department.base:readonly",
+)
+# 手机号是独立的字段权限，不随通讯录字段权限一并返回
 PHONE_SCOPE = "contact:user.phone:readonly"
 
 # 最近一次员工同步的结果，存成 app_config 的一行 JSON
@@ -110,7 +116,7 @@ class FeishuContactsClient:
     def _message(self, code, msg: str) -> str:
         if code == SCOPE_DENIED_CODE:
             return (
-                f"飞书应用缺少通讯录权限：请开通 {CONTACTS_SCOPE}"
+                f"飞书应用缺少通讯录权限：请开通字段权限 {'、'.join(CONTACTS_SCOPES)}"
                 f"（需要手机号时另加 {PHONE_SCOPE}），并把通讯录权限范围设为全部成员后重新发布应用"
             )
         if code in SCOPE_RANGE_CODES:
@@ -299,7 +305,7 @@ def sync_employees(store, client: FeishuContactsClient) -> dict:
         raise FeishuContactsError(
             "no_employee_no",
             f"飞书返回的 {len(employees)} 名成员都没有工号或姓名，无法按工号建档："
-            f"请在飞书补齐成员的工号与姓名，并确认应用已开通 {CONTACTS_SCOPE}（工号与姓名属于字段权限）",
+            f"请在飞书补齐成员的工号与姓名，并确认应用已开通 {'、'.join(CONTACTS_SCOPES)}（工号与姓名属于字段权限）",
         )
     summary = {
         "at": _now(),

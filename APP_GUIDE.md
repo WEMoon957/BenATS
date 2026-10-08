@@ -300,7 +300,7 @@ print(result["job_id"], result["resumes_imported"], result["errors"])
 把飞书通讯录里的成员批量写入员工档案，省去逐条手工建档。
 
 1. 先在「考勤管理 → 设置」中填写飞书企业自建应用的 App ID 与 App Secret（与考勤自动同步共用同一套凭证）。
-2. 在飞书开放平台为应用开通通讯录权限 `contact:contact:readonly`。它同时覆盖接口权限与「工号、姓名、部门、入职时间、职务」等字段权限；只开 `contact:contact.base:readonly` 时接口能调通，但返回体里没有工号，同步会把成员全部跳过。需要手机号时再单独开通 `contact:user.phone:readonly`。
+2. 在飞书开放平台逐项开通**通讯录字段权限**：`contact:user.base:readonly`（姓名）、`contact:user.employee:readonly`（工号、职务、入职时间、在职状态）、`contact:user.department:readonly`（所属部门）、`contact:department.base:readonly`（部门名称）；需要手机号再开通 `contact:user.phone:readonly`。飞书已不再提供 `contact:contact:readonly` 这类宽泛权限，而 `contact:contact.base:readonly` 只管接口能否调用、**不含上述任何字段**——只开它时接口能调通，但返回体里姓名与工号都是空，同步会把成员全部跳过。
 3. 在「开发配置 → 权限管理 → 数据权限」中把**通讯录权限范围**设为**全部成员**：查询根部门下的子部门要求全员范围，否则会报无部门权限。
 4. 重新发布应用版本，等管理员审批通过后权限才生效。
 5. 回到「人事中台」，点击员工信息卡片中的「从飞书同步员工」。完成后按钮旁显示最近一次同步的时间与新增 / 更新 / 跳过计数。

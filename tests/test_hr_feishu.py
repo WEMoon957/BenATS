@@ -273,7 +273,7 @@ def test_scope_denied_surfaces_actionable_error():
     with pytest.raises(FeishuContactsError) as excinfo:
         _client(handler).list_departments()
     assert excinfo.value.code == 99991672
-    assert "contact:contact:readonly" in str(excinfo.value)
+    assert "contact:user.base:readonly" in str(excinfo.value)
     assert "全部成员" in str(excinfo.value)
 
 
@@ -359,7 +359,7 @@ def test_sync_employees_reports_when_every_member_lacks_employee_no(tmp_path):
     with pytest.raises(FeishuContactsError) as excinfo:
         sync_employees(store, _client(handler))
 
-    assert "contact:contact:readonly" in str(excinfo.value)
+    assert "contact:user.base:readonly" in str(excinfo.value)
     assert store.query("SELECT * FROM employee") == []
     assert last_sync(store) is None
 
