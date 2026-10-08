@@ -667,6 +667,34 @@ def test_hr_attendance_sync_retries_invalid_ids_as_feishu_user_id(tmp_path, monk
     assert _TwoPassAttendanceClient.calls[1][1] == ["E001"]
 
 
+class _PartiallyValidAttendanceClient:
+    """工号大多有效、个别无效：不该因为个别成员而整体失败。"""
+
+    def __init__(self, app_id, app_secret) -> None:
+        self.app_id = app_id
+        self.app_secret = app_secret
+
+    def query_user_tasks(self, user_ids, date_from, date_to, *, employee_type="employee_no"):
+        if employee_type != "employee_no":
+            return [], list(user_ids)
+        valid = [user_id for user_id in user_ids if user_id != "E999"]
+        invalid = [user_id for user_id in user_ids if user_id == "E999"]
+        return [{"user_id": user_id, "day": int(date_from), "records": []} for user_id in valid], invalid
+
+
+def test_hr_attendance_sync_tolerates_individually_invalid_ids(tmp_path, monkeypatch):
+    client, headers, store = _boot(tmp_path, monkeypatch)
+    _enable_feishu_attendance(store)
+    _insert_employee(store)
+    _insert_employee(store, employee_no="E999", name="李四")
+    monkeypatch.setattr("app.attendance.sync.FeishuAttendanceClient", _PartiallyValidAttendanceClient)
+
+    body = client.post("/api/hr/feishu-sync", headers=headers).json()
+
+    assert body["ok"] is True
+    assert body["matched_employees"] == 1
+
+
 def test_hr_attendance_sync_uses_user_id_results(tmp_path, monkeypatch):
     """工号无效但用户 ID 有效时，打卡结果按用户 ID 取回。"""
     client, headers, store = _boot(tmp_path, monkeypatch)

@@ -105,8 +105,9 @@ class FeishuSyncEngine:
                     invalid, date_from, date_to, employee_type=EMPLOYEE_ID
                 )
                 results.extend(fallback)
-                # 两种类型都不认这些键：那是档案里的标识飞书不认，不能当成「当月没人打卡」记一批全零
-                if not fallback and len(still_invalid) == len(invalid):
+                # 两种类型都不认这些键，且一条打卡都没取到时：那是档案里的标识飞书不认，
+                # 不能当成「当月没人打卡」记一批全零。个别成员标识无效时只要有人取到数据就继续。
+                if not results and not fallback and len(still_invalid) == len(invalid):
                     raise FeishuAttendanceError(
                         "invalid_employee_ids",
                         f"飞书考勤不认这 {len(invalid)} 个员工标识（工号与用户 ID 都试过）："
