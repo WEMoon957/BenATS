@@ -16,7 +16,10 @@ from typing import Iterator
 import httpx
 
 TOKEN_URL = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
-DEPARTMENTS_CHILDREN_URL = "https://open.feishu.cn/open-apis/contact/v3/departments/children"
+# 部门 ID 是路径参数，子部门列表不接受 department_id 查询参数
+DEPARTMENTS_CHILDREN_URL = (
+    "https://open.feishu.cn/open-apis/contact/v3/departments/{department_id}/children"
+)
 DEPARTMENT_USERS_URL = "https://open.feishu.cn/open-apis/contact/v3/users/find_by_department"
 
 CHINA_TZ = timezone(timedelta(hours=8))
@@ -27,7 +30,12 @@ TOKEN_REFRESH_MARGIN = 120
 
 # 飞书拒绝未开通的权限时返回的业务码，用于把报错翻成可执行的提示
 SCOPE_DENIED_CODE = 99991672
-CONTACTS_SCOPE = "contact:contact.base:readonly"
+# 部门不在应用通讯录权限范围内；查询根部门要求权限范围为全部成员
+SCOPE_RANGE_CODES = {40004, 40014}
+# 既覆盖通讯录接口权限，也覆盖工号、姓名、部门、入职时间与职务等字段权限
+CONTACTS_SCOPE = "contact:contact:readonly"
+# 手机号是独立的字段权限，不随通讯录权限一并返回
+PHONE_SCOPE = "contact:user.phone:readonly"
 
 # 最近一次员工同步的结果，存成 app_config 的一行 JSON
 CONFIG_LAST_SYNC = "feishu_contacts_last_sync"
@@ -99,7 +107,15 @@ class FeishuContactsClient:
 
     def _message(self, code, msg: str) -> str:
         if code == SCOPE_DENIED_CODE:
-            return f"飞书应用尚未开通通讯录权限，请开通 {CONTACTS_SCOPE} 并重新发布应用后重试"
+            return (
+                f"飞书应用缺少通讯录权限：请开通 {CONTACTS_SCOPE}"
+                f"（需要手机号时另加 {PHONE_SCOPE}），并把通讯录权限范围设为全部成员后重新发布应用"
+            )
+        if code in SCOPE_RANGE_CODES:
+            return (
+                "飞书应用的通讯录权限范围不包含该部门：请在开放平台把通讯录权限范围设为全部成员"
+                "（查询根部门下的子部门要求全员范围），重新发布后重试"
+            )
         return str(msg)
 
     def _pages(self, url: str, params: dict) -> Iterator[dict]:
@@ -123,8 +139,8 @@ class FeishuContactsClient:
         while queue:
             parent = queue.pop(0)
             for item in self._pages(
-                DEPARTMENTS_CHILDREN_URL,
-                {"department_id": parent, "department_id_type": DEPARTMENT_ID_TYPE},
+                DEPARTMENTS_CHILDREN_URL.format(department_id=parent),
+                {"department_id_type": DEPARTMENT_ID_TYPE},
             ):
                 department_id = str(item.get("open_department_id") or item.get("department_id") or "")
                 if not department_id or department_id in visited:
@@ -242,6 +258,13 @@ def sync_employees(store, client: FeishuContactsClient) -> dict:
                 ),
             )
             inserted += 1
+    # 成员全部缺工号或姓名时基本是字段权限没开齐，直接给出可执行的提示而不是记一条空摘要
+    if employees and not inserted and not updated:
+        raise FeishuContactsError(
+            "no_employee_no",
+            f"飞书返回的 {len(employees)} 名成员都没有工号或姓名，无法按工号建档："
+            f"请在飞书补齐成员的工号与姓名，并确认应用已开通 {CONTACTS_SCOPE}（工号与姓名属于字段权限）",
+        )
     summary = {
         "at": _now(),
         "total": len(employees),

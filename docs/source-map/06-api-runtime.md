@@ -165,7 +165,8 @@ POST   /api/hr/feishu-sync                           立即触发一轮飞书考
 
 - `dashboard` 一次请求内分别读取考勤库与招聘库，不做任何写入：员工总数与在职数、部门分布、最近一个已完成批次的考勤汇总、候选人总数与阶段分布、筛选任务数，以及飞书凭证与员工同步状态。
 - 考勤部分取 `import_batch` 中按 `year`、`month`、`created_at` 排序最新的 `completed` 批次；没有该批次时 `latest_period` 为 `null`，出勤率与计数为 0。其中的 `attendance.feishu` 另带同步开关、引擎运行状态、最近错误与最新一个 `feishu-sync` 批次。
-- 员工同步复用「考勤管理」保存的飞书应用凭证，需要 `contact:contact.base:readonly` 权限，同步在 `run_in_threadpool` 中执行；凭证未配置返回 400，飞书侧拒绝返回 502 与可执行提示。
+- 员工同步复用「考勤管理」保存的飞书应用凭证，需要 `contact:contact:readonly` 且通讯录权限范围为全部成员：工号、姓名、部门、入职时间与职务属**字段权限**，只开 `contact:contact.base:readonly` 会拿不到工号而把成员全部跳过（此时直接报错，不记空摘要）；手机号另需 `contact:user.phone:readonly`。查询根部门下的子部门要求全员范围，否则飞书返回无部门权限。同步在 `run_in_threadpool` 中执行，凭证未配置返回 400，飞书侧拒绝返回 502 与可执行提示。
+- 通讯录两个接口的形状：`GET /contact/v3/departments/{department_id}/children` 用**路径参数**传部门 ID（根部门为 `0`），`GET /contact/v3/users/find_by_department` 用**查询参数**传 `department_id`；两者都以 `department_id_type=open_department_id` 对齐，分页读 `items`、`has_more`、`page_token`。
 - 工号是 `employee` 表的唯一键，也是飞书考勤按工号取数的前提：成员缺工号或缺姓名时跳过并计入 `skipped`，只按工号更新或新增，不删除本地已有员工。
 - 考勤同步同样在 `run_in_threadpool` 中执行一轮 `FeishuSyncEngine.sync_once()`，返回其结果字典：未配置、未开启或没有在职员工时是 `ok: false` 与 `detail`，属正常状态因而仍返回 200；引擎未初始化返回 503。
 

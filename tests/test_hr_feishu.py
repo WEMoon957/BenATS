@@ -18,7 +18,9 @@ from app.main import create_app
 from app.recruitment.db import RecruitmentStore
 
 TOKEN_PATH = "/open-apis/auth/v3/tenant_access_token/internal"
-CHILDREN_PATH = "/open-apis/contact/v3/departments/children"
+# 部门 ID 是路径参数：/departments/:department_id/children
+CHILDREN_PREFIX = "/open-apis/contact/v3/departments/"
+CHILDREN_SUFFIX = "/children"
 USERS_PATH = "/open-apis/contact/v3/users/find_by_department"
 
 ROOT = "0"
@@ -66,11 +68,18 @@ def _token_response() -> httpx.Response:
     )
 
 
+def _children_department(path: str) -> str | None:
+    """从子部门接口的路径里取出部门 ID，取不到返回 None。"""
+    if path.startswith(CHILDREN_PREFIX) and path.endswith(CHILDREN_SUFFIX):
+        return path[len(CHILDREN_PREFIX) : -len(CHILDREN_SUFFIX)]
+    return None
+
+
 def _handler(request: httpx.Request) -> httpx.Response:
     if request.url.path == TOKEN_PATH:
         return _token_response()
-    if request.url.path == CHILDREN_PATH:
-        department = request.url.params.get("department_id", "")
+    department = _children_department(request.url.path)
+    if department is not None:
         items = DEPARTMENTS.get(department, [])
         return httpx.Response(200, json={"code": 0, "data": {"items": items, "has_more": False}})
     if request.url.path == USERS_PATH:
@@ -159,8 +168,9 @@ def test_fetch_employees_dedupes_member_seen_in_two_departments():
     def handler(request):
         if request.url.path == TOKEN_PATH:
             return _token_response()
-        if request.url.path == CHILDREN_PATH:
-            items = [{"open_department_id": TECH, "name": "技术部"}] if request.url.params.get("department_id") == ROOT else []
+        department = _children_department(request.url.path)
+        if department is not None:
+            items = [{"open_department_id": TECH, "name": "技术部"}] if department == ROOT else []
             return httpx.Response(200, json={"code": 0, "data": {"items": items, "has_more": False}})
         return httpx.Response(200, json={"code": 0, "data": {"items": [member], "has_more": False}})
 
@@ -174,7 +184,7 @@ def test_fetch_employees_follows_pagination():
     def handler(request):
         if request.url.path == TOKEN_PATH:
             return _token_response()
-        if request.url.path == CHILDREN_PATH:
+        if _children_department(request.url.path) is not None:
             return httpx.Response(200, json={"code": 0, "data": {"items": [], "has_more": False}})
         if not request.url.params.get("page_token"):
             return httpx.Response(
@@ -184,6 +194,28 @@ def test_fetch_employees_follows_pagination():
 
     employee_nos = {item["employee_no"] for item in _client(handler).fetch_employees()}
     assert employee_nos == {"E001", "E002"}
+
+
+def test_requests_use_documented_paths_and_params():
+    """钉住官方接口形状：部门 ID 是路径参数，用户列表接口用查询参数。"""
+    seen: list[tuple[str, dict]] = []
+
+    def handler(request):
+        seen.append((request.url.path, dict(request.url.params)))
+        if request.url.path == TOKEN_PATH:
+            return _token_response()
+        return httpx.Response(200, json={"code": 0, "data": {"items": [], "has_more": False}})
+
+    _client(handler).fetch_employees()
+
+    children = [item for item in seen if item[0].endswith(CHILDREN_SUFFIX)]
+    assert children[0][0] == "/open-apis/contact/v3/departments/0/children"
+    assert children[0][1]["department_id_type"] == "open_department_id"
+    assert "department_id" not in children[0][1]
+
+    users = [item for item in seen if item[0] == USERS_PATH]
+    assert users[0][1]["department_id"] == "0"
+    assert users[0][1]["department_id_type"] == "open_department_id"
 
 
 def test_business_request_carries_tenant_token_from_top_level():
@@ -211,7 +243,20 @@ def test_scope_denied_surfaces_actionable_error():
     with pytest.raises(FeishuContactsError) as excinfo:
         _client(handler).list_departments()
     assert excinfo.value.code == 99991672
-    assert "contact:contact.base:readonly" in str(excinfo.value)
+    assert "contact:contact:readonly" in str(excinfo.value)
+    assert "全部成员" in str(excinfo.value)
+
+
+@pytest.mark.parametrize("code", [40004, 40014])
+def test_scope_range_denied_explains_permission_range(code):
+    def handler(request):
+        if request.url.path == TOKEN_PATH:
+            return _token_response()
+        return httpx.Response(403, json={"code": code, "msg": "no dept authority error"})
+
+    with pytest.raises(FeishuContactsError) as excinfo:
+        _client(handler).list_departments()
+    assert "通讯录权限范围" in str(excinfo.value)
 
 
 # ---- 员工档案同步 ----
@@ -236,6 +281,26 @@ def test_sync_employees_inserts_new_members_and_skips_missing_employee_no(tmp_pa
     assert rows["E001"]["active"] == 1
     assert rows["E003"]["active"] == 0
     assert rows["E003"]["employment_status"] == "left"
+
+
+def test_sync_employees_reports_when_every_member_lacks_employee_no(tmp_path):
+    """成员全缺工号时不写空摘要，而是提示字段权限与数据本身都要检查。"""
+    store = _store(tmp_path)
+    members = [{"open_id": "ou-1", "name": "张三", "employee_no": "", "department_ids": [], "status": {}}]
+
+    def handler(request):
+        if request.url.path == TOKEN_PATH:
+            return _token_response()
+        if _children_department(request.url.path) is not None:
+            return httpx.Response(200, json={"code": 0, "data": {"items": [], "has_more": False}})
+        return httpx.Response(200, json={"code": 0, "data": {"items": members, "has_more": False}})
+
+    with pytest.raises(FeishuContactsError) as excinfo:
+        sync_employees(store, _client(handler))
+
+    assert "contact:contact:readonly" in str(excinfo.value)
+    assert store.query("SELECT * FROM employee") == []
+    assert last_sync(store) is None
 
 
 def test_sync_employees_refreshes_feishu_fields_and_keeps_local_only_fields(tmp_path):
