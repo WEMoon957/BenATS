@@ -623,7 +623,7 @@ def test_hr_attendance_sync_runs_engine_and_records_batch(tmp_path, monkeypatch)
 
 
 class _TwoPassAttendanceClient:
-    """工号整批无效、换用户 ID 后有效：验证第二段兜底查询确实发生。"""
+    """两种员工 ID 类型都不认这些键：验证第二段兜底查询发生过，且不会写成全零批次。"""
 
     calls: list = []
 
@@ -633,12 +633,24 @@ class _TwoPassAttendanceClient:
 
     def query_user_tasks(self, user_ids, date_from, date_to, *, employee_type="employee_no"):
         _TwoPassAttendanceClient.calls.append((employee_type, list(user_ids)))
+        return [], list(user_ids)
+
+
+class _UserIdsValidAttendanceClient:
+    """工号无效、用户 ID 有效：第二段兜底查到了打卡。"""
+
+    def __init__(self, app_id, app_secret) -> None:
+        self.app_id = app_id
+        self.app_secret = app_secret
+
+    def query_user_tasks(self, user_ids, date_from, date_to, *, employee_type="employee_no"):
         if employee_type == "employee_no":
             return [], list(user_ids)
-        return [], []
+        return [{"user_id": "E001", "employee_name": "张三", "day": int(date_from), "records": []}], []
 
 
 def test_hr_attendance_sync_retries_invalid_ids_as_feishu_user_id(tmp_path, monkeypatch):
+    """两种类型都不认这些键时必须报错，不能记一批全零打卡。"""
     client, headers, store = _boot(tmp_path, monkeypatch)
     _enable_feishu_attendance(store)
     _insert_employee(store)
@@ -648,9 +660,24 @@ def test_hr_attendance_sync_retries_invalid_ids_as_feishu_user_id(tmp_path, monk
     response = client.post("/api/hr/feishu-sync", headers=headers)
 
     assert response.status_code == 200
-    assert response.json()["ok"] is True
+    body = response.json()
+    assert body["ok"] is False
+    assert "工号与用户 ID 都试过" in body["detail"]
     assert [call[0] for call in _TwoPassAttendanceClient.calls] == ["employee_no", "employee_id"]
     assert _TwoPassAttendanceClient.calls[1][1] == ["E001"]
+
+
+def test_hr_attendance_sync_uses_user_id_results(tmp_path, monkeypatch):
+    """工号无效但用户 ID 有效时，打卡结果按用户 ID 取回。"""
+    client, headers, store = _boot(tmp_path, monkeypatch)
+    _enable_feishu_attendance(store)
+    _insert_employee(store)
+    monkeypatch.setattr("app.attendance.sync.FeishuAttendanceClient", _UserIdsValidAttendanceClient)
+
+    body = client.post("/api/hr/feishu-sync", headers=headers).json()
+
+    assert body["ok"] is True
+    assert body["matched_employees"] == 1
 
 
 def test_attendance_query_reports_invalid_ids_and_tolerates_all_invalid(monkeypatch):

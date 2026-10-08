@@ -101,10 +101,17 @@ class FeishuSyncEngine:
             results, invalid = client.query_user_tasks(employee_nos, date_from, date_to)
             # 员工键可能是工号，也可能是飞书用户 ID：先按工号查，再把飞书判为无效的键按用户 ID 查一次
             if invalid:
-                fallback, _ = client.query_user_tasks(
+                fallback, still_invalid = client.query_user_tasks(
                     invalid, date_from, date_to, employee_type=EMPLOYEE_ID
                 )
                 results.extend(fallback)
+                # 两种类型都不认这些键：那是档案里的标识飞书不认，不能当成「当月没人打卡」记一批全零
+                if not fallback and len(still_invalid) == len(invalid):
+                    raise FeishuAttendanceError(
+                        "invalid_employee_ids",
+                        f"飞书考勤不认这 {len(invalid)} 个员工标识（工号与用户 ID 都试过）："
+                        "请为成员填写飞书里的工号或用户 ID，或确认「通讯录权限范围」已覆盖他们后重试",
+                    )
         except FeishuAttendanceError as exc:
             self.last_error = str(exc)
             return {"ok": False, "detail": self.last_error}
