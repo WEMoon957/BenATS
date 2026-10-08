@@ -543,6 +543,20 @@ def test_dashboard_reports_feishu_state(tmp_path, monkeypatch):
     }
 
 
+def test_dashboard_jobs_count_is_not_capped_at_twenty(tmp_path, monkeypatch):
+    """「筛选任务」是全量统计，不能沿用最近列表的 20 条上限。"""
+    client, headers, _store_instance = _boot(tmp_path, monkeypatch)
+    from app.repository import JobRepository
+
+    repository = JobRepository(tmp_path)
+    for index in range(25):
+        repository.create(title=f"岗位 {index}")
+
+    body = client.get("/api/hr/dashboard", headers=headers).json()
+
+    assert body["recruitment"]["jobs"] == 25
+
+
 def test_sync_endpoint_requires_feishu_credentials(tmp_path, monkeypatch):
     client, headers, _store_instance = _boot(tmp_path, monkeypatch)
 

@@ -102,7 +102,8 @@ def register_hr_routes(
             {"stage": row["stage"], "label": STAGE_LABELS.get(row["stage"], row["stage"]), "count": row["c"]}
             for row in stage_rows
         ]
-        jobs = len(repository.list_recent())
+        # 全量未归档任务数：list_recent 默认封顶 20，只适合最近列表，不能用来计数
+        jobs = len(repository.list_jobs(archived=False))
 
         return {
             "employees": {"total": total, "active": active, "departments": departments},
