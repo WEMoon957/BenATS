@@ -66,6 +66,28 @@ describe("人事中台飞书员工同步", () => {
     expect(document.querySelector(".hr-sync .hr-period")?.textContent).toContain("尚未从飞书同步");
   });
 
+  it("没有工号改用飞书用户 ID 建档时，同步行把它显示出来", async () => {
+    dashboard = {
+      ...baseDashboard(),
+      feishu: {
+        credentials_configured: true,
+        employee_sync: {
+          at: "2026-10-08T03:00:00+00:00",
+          total: 25,
+          inserted: 25,
+          updated: 0,
+          skipped: 0,
+          fallback_user_id: 25,
+        },
+      },
+    };
+    await renderView(vi.fn());
+
+    expect(document.querySelector(".hr-sync .hr-period")?.textContent).toContain(
+      "其中 25 人无工号，用飞书用户 ID 建档"
+    );
+  });
+
   it("点击按钮发起 POST、刷新看板并提示同步结果", async () => {
     const onToast = vi.fn();
     await renderView(onToast);
@@ -78,6 +100,7 @@ describe("人事中台飞书员工同步", () => {
           inserted: 1,
           updated: 2,
           skipped: 0,
+          fallback_user_id: 0,
         };
         dashboard = {
           ...baseDashboard(),

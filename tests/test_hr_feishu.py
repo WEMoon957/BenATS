@@ -149,6 +149,7 @@ def test_fetch_employees_maps_feishu_fields():
     by_no = {item["employee_no"]: item for item in _client().fetch_employees() if item["employee_no"]}
     assert by_no["E001"] == {
         "employee_no": "E001",
+        "feishu_user_id": "ou-1",
         "name": "张三",
         "department": "技术部",
         "position": "后端工程师",
@@ -323,51 +324,33 @@ def test_scope_range_error_survives_scope_lookup_failure():
 # ---- 员工档案同步 ----
 
 
-def test_sync_employees_inserts_new_members_and_skips_missing_employee_no(tmp_path):
+def test_sync_employees_inserts_members_and_falls_back_to_user_id(tmp_path):
     store = _store(tmp_path)
     summary = sync_employees(store, _client())
 
     assert summary["total"] == 3
-    assert summary["inserted"] == 2
+    assert summary["inserted"] == 3
     assert summary["updated"] == 0
-    assert summary["skipped"] == 1
-    assert summary["skipped_missing_employee_no"] == 1
-    assert summary["skipped_missing_name"] == 0
+    assert summary["skipped"] == 0
+    # 李四没有工号，改用飞书用户 ID 建档
+    assert summary["fallback_user_id"] == 1
     assert last_sync(store) == summary
 
     rows = {row["employee_no"]: row for row in store.query("SELECT * FROM employee")}
-    assert set(rows) == {"E001", "E003"}
+    assert set(rows) == {"E001", "ou-2", "E003"}
     assert rows["E001"]["department"] == "技术部"
     assert rows["E001"]["position"] == "后端工程师"
     assert rows["E001"]["phone"] == "13800000000"
     assert rows["E001"]["join_date"] == "2024-01-01"
     assert rows["E001"]["active"] == 1
+    assert rows["ou-2"]["name"] == "李四"
+    assert rows["ou-2"]["department"] == "市场部"
     assert rows["E003"]["active"] == 0
     assert rows["E003"]["employment_status"] == "left"
 
 
-def test_sync_employees_reports_when_every_member_lacks_employee_no(tmp_path):
-    """成员有姓名但都没工号时，指向飞书资料缺工号，而不是让用户去查字段权限。"""
-    store = _store(tmp_path)
-    members = [{"open_id": "ou-1", "name": "张三", "employee_no": "", "department_ids": [], "status": {}}]
-
-    def handler(request):
-        if request.url.path == TOKEN_PATH:
-            return _token_response()
-        if _children_department(request.url.path) is not None:
-            return httpx.Response(200, json={"code": 0, "data": {"items": [], "has_more": False}})
-        return httpx.Response(200, json={"code": 0, "data": {"items": members, "has_more": False}})
-
-    with pytest.raises(FeishuContactsError) as excinfo:
-        sync_employees(store, _client(handler))
-
-    assert "补齐工号" in str(excinfo.value)
-    assert store.query("SELECT * FROM employee") == []
-    assert last_sync(store) is None
-
-
 def test_sync_employees_reports_missing_name_as_field_permission_problem(tmp_path):
-    """连姓名都读不到，指向字段权限没开齐。"""
+    """连姓名都读不到时，指向字段权限没开齐。"""
     store = _store(tmp_path)
     members = [{"open_id": "ou-1", "name": "", "employee_no": "E001", "department_ids": [], "status": {}}]
 
@@ -383,6 +366,8 @@ def test_sync_employees_reports_missing_name_as_field_permission_problem(tmp_pat
 
     assert "contact:user.base:readonly" in str(excinfo.value)
     assert "字段权限" in str(excinfo.value)
+    assert store.query("SELECT * FROM employee") == []
+    assert last_sync(store) is None
 
 
 def test_sync_employees_refreshes_feishu_fields_and_keeps_local_only_fields(tmp_path):
@@ -404,7 +389,7 @@ def test_sync_employees_refreshes_feishu_fields_and_keeps_local_only_fields(tmp_
     )
 
     summary = sync_employees(store, _client())
-    assert summary["inserted"] == 1
+    assert summary["inserted"] == 2
     assert summary["updated"] == 1
 
     row = store.query_one("SELECT * FROM employee WHERE employee_no = 'E001'")

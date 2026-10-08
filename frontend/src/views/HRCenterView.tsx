@@ -58,6 +58,8 @@ interface EmployeeSync {
   inserted: number;
   updated: number;
   skipped: number;
+  /** 没有工号、靠飞书用户 ID 建档的人数，这些人不会被飞书考勤按工号取到打卡 */
+  fallback_user_id: number;
 }
 
 interface FeishuSummary {
@@ -220,7 +222,10 @@ export function HRCenterView({ onToast }: HRCenterViewProps) {
                     inserted: lastSync.inserted,
                     updated: lastSync.updated,
                     skipped: lastSync.skipped,
-                  })
+                  }) +
+                  (lastSync.fallback_user_id
+                    ? t("hrFeishuSyncFallback", { count: lastSync.fallback_user_id })
+                    : "")
                 : t("hrFeishuNeverSynced")}
             </p>
           </div>
