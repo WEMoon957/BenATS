@@ -168,6 +168,7 @@ POST   /api/hr/feishu-sync                           立即触发一轮飞书考
 - 员工同步复用「考勤管理」保存的飞书应用凭证，需要 `contact:contact:readonly` 且通讯录权限范围为全部成员：工号、姓名、部门、入职时间与职务属**字段权限**，只开 `contact:contact.base:readonly` 会拿不到工号而把成员全部跳过（此时直接报错，不记空摘要）；手机号另需 `contact:user.phone:readonly`。查询根部门下的子部门要求全员范围，否则飞书返回无部门权限。同步在 `run_in_threadpool` 中执行，凭证未配置返回 400，飞书侧拒绝返回 502 与可执行提示。
 - 通讯录两个接口的形状：`GET /contact/v3/departments/{department_id}/children` 用**路径参数**传部门 ID（根部门为 `0`），`GET /contact/v3/users/find_by_department` 用**查询参数**传 `department_id`；两者都以 `department_id_type=open_department_id` 对齐，分页读 `items`、`has_more`、`page_token`。
 - 工号是 `employee` 表的唯一键，也是飞书考勤按工号取数的前提：成员缺工号或缺姓名时跳过并计入 `skipped`，只按工号更新或新增，不删除本地已有员工。
+- 在职判定读飞书 `status`：`is_exited`、`is_resigned`、`is_unjoin` 都记为非在职（`employment_status` 取 `left`），`is_frozen` 仍算在职员工；飞书通讯录不区分试用期与已转正，在职成员保留本地既有的在职状态。
 - 考勤同步同样在 `run_in_threadpool` 中执行一轮 `FeishuSyncEngine.sync_once()`，返回其结果字典：未配置、未开启或没有在职员工时是 `ok: false` 与 `detail`，属正常状态因而仍返回 200；引擎未初始化返回 503。
 
 考勤（`app/attendance/routes.py`）使用独立的账号体系，除 `login` 外的端点都要带 `X-Attendance-Token`：

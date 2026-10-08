@@ -173,6 +173,11 @@ class FeishuContactsClient:
         return list(employees.values())
 
 
+def _is_employed(status: dict) -> bool:
+    """离职、主动退出与尚未加入企业都不计入在职；账号暂停仍视为在职员工。"""
+    return not (status.get("is_exited") or status.get("is_resigned") or status.get("is_unjoin"))
+
+
 def _to_employee(user: dict, department_names: dict[str, str]) -> dict:
     status = user.get("status") or {}
     department = ""
@@ -188,7 +193,7 @@ def _to_employee(user: dict, department_names: dict[str, str]) -> dict:
         "position": str(user.get("job_title") or "").strip(),
         "phone": str(user.get("mobile") or "").strip(),
         "join_date": _join_date(user.get("join_time")),
-        "active": not (status.get("is_exited") or status.get("is_resigned")),
+        "active": _is_employed(status),
     }
 
 

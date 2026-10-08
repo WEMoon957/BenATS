@@ -162,6 +162,35 @@ def test_fetch_employees_marks_exited_member_inactive():
     assert by_no["E003"]["active"] is False
 
 
+@pytest.mark.parametrize("status", [{"is_exited": True}, {"is_resigned": True}, {"is_unjoin": True}])
+def test_fetch_employees_excludes_members_who_are_not_employed(status):
+    """离职、主动退出与尚未加入企业都不计入在职。"""
+    member = {"open_id": "ou-9", "name": "赵六", "employee_no": "E009", "department_ids": [], "status": status}
+
+    def handler(request):
+        if request.url.path == TOKEN_PATH:
+            return _token_response()
+        if _children_department(request.url.path) is not None:
+            return httpx.Response(200, json={"code": 0, "data": {"items": [], "has_more": False}})
+        return httpx.Response(200, json={"code": 0, "data": {"items": [member], "has_more": False}})
+
+    assert _client(handler).fetch_employees()[0]["active"] is False
+
+
+def test_fetch_employees_keeps_frozen_member_employed():
+    """账号暂停仍是在职员工，只是账号被冻结。"""
+    member = {"open_id": "ou-9", "name": "赵六", "employee_no": "E009", "department_ids": [], "status": {"is_frozen": True}}
+
+    def handler(request):
+        if request.url.path == TOKEN_PATH:
+            return _token_response()
+        if _children_department(request.url.path) is not None:
+            return httpx.Response(200, json={"code": 0, "data": {"items": [], "has_more": False}})
+        return httpx.Response(200, json={"code": 0, "data": {"items": [member], "has_more": False}})
+
+    assert _client(handler).fetch_employees()[0]["active"] is True
+
+
 def test_fetch_employees_dedupes_member_seen_in_two_departments():
     member = {"open_id": "ou-1", "name": "张三", "employee_no": "E001", "department_ids": [TECH], "status": {}}
 
