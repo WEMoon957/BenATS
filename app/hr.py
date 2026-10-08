@@ -15,11 +15,13 @@ from .attendance.feishu_contacts import (
     last_sync,
     sync_employees,
 )
-from .attendance.sync import CONFIG_APP_ID, CONFIG_APP_SECRET
+from .attendance.sync import CONFIG_APP_ID, CONFIG_APP_SECRET, CONFIG_ENABLED, FEISHU_SYNC_HASH
 from .recruitment.db import STAGE_LABELS
 
 
-def register_hr_routes(app: FastAPI, attendance_store, recruitment_store, repository) -> None:
+def register_hr_routes(
+    app: FastAPI, attendance_store, recruitment_store, repository, feishu_sync
+) -> None:
     @app.get("/api/hr/dashboard")
     async def hr_dashboard():
         # ---- 员工信息 ----
@@ -71,6 +73,28 @@ def register_hr_routes(app: FastAPI, attendance_store, recruitment_store, reposi
                 (batch_id,),
             )[0]["c"]
 
+        # ---- 飞书考勤同步状态（最新一个飞书同步批次） ----
+        last_feishu_batch = attendance_store.query_one(
+            "SELECT year, month, status, matched_rows, completed_at FROM import_batch "
+            "WHERE file_sha256 = ? ORDER BY year DESC, month DESC, created_at DESC",
+            (FEISHU_SYNC_HASH,),
+        )
+        attendance["feishu"] = {
+            "enabled": attendance_store.get_config(CONFIG_ENABLED) == "1",
+            "running": bool(feishu_sync and feishu_sync.running),
+            "last_error": feishu_sync.last_error if feishu_sync else "",
+            "last_batch": (
+                {
+                    "period": f"{last_feishu_batch['year']:04d}-{last_feishu_batch['month']:02d}",
+                    "status": last_feishu_batch["status"],
+                    "matched_rows": last_feishu_batch["matched_rows"] or 0,
+                    "completed_at": last_feishu_batch["completed_at"],
+                }
+                if last_feishu_batch
+                else None
+            ),
+        }
+
         # ---- 招聘进展 ----
         candidates = recruitment_store.query("SELECT COUNT(*) AS c FROM candidate")[0]["c"]
         stage_rows = recruitment_store.query("SELECT stage, COUNT(*) AS c FROM candidate GROUP BY stage")
@@ -101,3 +125,9 @@ def register_hr_routes(app: FastAPI, attendance_store, recruitment_store, reposi
             return await run_in_threadpool(sync_employees, attendance_store, client)
         except FeishuContactsError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @app.post("/api/hr/feishu-sync")
+    async def sync_feishu_attendance():
+        if not feishu_sync:
+            raise HTTPException(status_code=503, detail="飞书考勤同步引擎未初始化")
+        return await run_in_threadpool(feishu_sync.sync_once)

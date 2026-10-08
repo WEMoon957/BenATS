@@ -18,11 +18,26 @@ interface EmployeesSummary {
   departments: DepartmentCount[];
 }
 
+interface AttendanceBatch {
+  period: string;
+  status: string;
+  matched_rows: number;
+  completed_at: string | null;
+}
+
+interface AttendanceFeishu {
+  enabled: boolean;
+  running: boolean;
+  last_error: string;
+  last_batch: AttendanceBatch | null;
+}
+
 interface AttendanceSummary {
   latest_period: string | null;
   attendance_rate: number;
   review_count: number;
   pending_cross_day: number;
+  feishu: AttendanceFeishu;
 }
 
 interface StageCount {
@@ -83,6 +98,7 @@ function CountBars({ items }: { items: { label: string; count: number }[] }) {
 export function HRCenterView({ onToast }: HRCenterViewProps) {
   const [data, setData] = useState<HrDashboard | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [syncingAttendance, setSyncingAttendance] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -112,6 +128,27 @@ export function HRCenterView({ onToast }: HRCenterViewProps) {
     }
   }, [load, onToast]);
 
+  /** 立即触发一轮飞书考勤同步：失败原因由后端 detail 返回，结果与状态回读看板。 */
+  const syncAttendance = useCallback(async () => {
+    setSyncingAttendance(true);
+    try {
+      const result = await api<{ ok: boolean; detail?: string; period?: string; matched_employees?: number }>(
+        "/api/hr/feishu-sync",
+        { method: "POST" }
+      );
+      await load();
+      onToast(
+        result.ok
+          ? t("hrAttendanceSyncDone", { period: result.period ?? "", matched: result.matched_employees ?? 0 })
+          : (result.detail ?? t("hrAttendanceSyncFailed"))
+      );
+    } catch (error) {
+      onToast((error as Error).message);
+    } finally {
+      setSyncingAttendance(false);
+    }
+  }, [load, onToast]);
+
   useEffect(() => {
     registerView("hrcenter", { enter: () => void load() });
   }, [load]);
@@ -134,7 +171,22 @@ export function HRCenterView({ onToast }: HRCenterViewProps) {
     attendance_rate: 0,
     review_count: 0,
     pending_cross_day: 0,
+    feishu: { enabled: false, running: false, last_error: "", last_batch: null },
   };
+  const attendanceFeishu = attendance.feishu ?? {
+    enabled: false,
+    running: false,
+    last_error: "",
+    last_batch: null,
+  };
+  const attendanceState = !attendanceFeishu.enabled
+    ? t("hrAttendanceSyncOff")
+    : attendanceFeishu.last_batch
+      ? t("hrAttendanceSyncBatch", {
+          period: attendanceFeishu.last_batch.period,
+          matched: attendanceFeishu.last_batch.matched_rows,
+        })
+      : t("hrAttendanceSyncNever");
   const recruitment = data.recruitment ?? { candidates: 0, jobs: 0, stages: [] };
   const feishu = data.feishu ?? { credentials_configured: false, employee_sync: null };
   const lastSync = feishu.employee_sync;
@@ -199,6 +251,12 @@ export function HRCenterView({ onToast }: HRCenterViewProps) {
           <p className="hr-period">
             {t("hrPeriod")}：{attendance.latest_period || t("hrNoPeriod")}
           </p>
+          <div className="hr-sync">
+            <Button variant="secondary" busy={syncingAttendance} onClick={() => void syncAttendance()}>
+              {syncingAttendance ? t("hrAttendanceSyncing") : t("hrAttendanceSyncNow")}
+            </Button>
+            <p className="hr-period">{attendanceFeishu.last_error || attendanceState}</p>
+          </div>
         </div>
 
         <div className="boss-panel hr-panel">

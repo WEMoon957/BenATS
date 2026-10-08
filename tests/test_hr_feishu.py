@@ -1,6 +1,6 @@
-"""人事中台接入飞书通讯录：部门树抓取、员工档案同步与接口契约。
+"""人事中台接入飞书：通讯录员工同步与考勤同步状态的接口契约。
 
-网络层用 httpx.MockTransport 打桩，不依赖真实飞书租户与已开通的通讯录权限。
+通讯录网络层用 httpx.MockTransport 打桩，考勤客户端按模块替换，均不依赖真实飞书租户。
 """
 
 import httpx
@@ -364,3 +364,76 @@ def test_sync_endpoint_reports_feishu_error_as_bad_gateway(tmp_path, monkeypatch
 
     assert response.status_code == 502
     assert "99991672" in response.json()["detail"]
+
+
+# ---- 飞书考勤同步 ----
+
+
+class _StubAttendanceClient:
+    """替换考勤客户端，避免测试触网；返回空打卡即可走完一轮同步。"""
+
+    def __init__(self, app_id, app_secret) -> None:
+        self.app_id = app_id
+        self.app_secret = app_secret
+
+    def query_user_tasks(self, user_ids, date_from, date_to):
+        return []
+
+
+def _enable_feishu_attendance(store) -> None:
+    store.set_config("feishu_app_id", "cli_test")
+    store.set_config("feishu_app_secret", "secret")
+    store.set_config("feishu_enabled", "1")
+
+
+def test_dashboard_reports_attendance_feishu_state(tmp_path, monkeypatch):
+    client, headers, _store_instance = _boot(tmp_path, monkeypatch)
+
+    body = client.get("/api/hr/dashboard", headers=headers).json()
+
+    assert body["attendance"]["feishu"] == {
+        "enabled": False,
+        "running": False,
+        "last_error": "",
+        "last_batch": None,
+    }
+
+
+def test_hr_attendance_sync_runs_engine_and_records_batch(tmp_path, monkeypatch):
+    client, headers, store = _boot(tmp_path, monkeypatch)
+    _enable_feishu_attendance(store)
+    _insert_employee(store)
+    monkeypatch.setattr("app.attendance.sync.FeishuAttendanceClient", _StubAttendanceClient)
+
+    response = client.post("/api/hr/feishu-sync", headers=headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert body["employees"] == 1
+
+    state = client.get("/api/hr/dashboard", headers=headers).json()["attendance"]["feishu"]
+    assert state["enabled"] is True
+    assert state["last_error"] == ""
+    assert state["last_batch"]["period"] == body["period"]
+    assert state["last_batch"]["status"] == "completed"
+    assert state["last_batch"]["completed_at"]
+
+
+def test_hr_attendance_sync_reports_missing_config_without_error(tmp_path, monkeypatch):
+    client, headers, _store_instance = _boot(tmp_path, monkeypatch)
+
+    response = client.post("/api/hr/feishu-sync", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": False, "detail": "飞书考勤未配置或未启用"}
+
+
+def test_hr_attendance_sync_reports_missing_employees(tmp_path, monkeypatch):
+    client, headers, store = _boot(tmp_path, monkeypatch)
+    _enable_feishu_attendance(store)
+
+    response = client.post("/api/hr/feishu-sync", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": False, "detail": "没有可同步的在职员工"}

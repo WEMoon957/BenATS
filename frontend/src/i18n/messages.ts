@@ -453,7 +453,14 @@ export const messages: Record<"zh-CN" | "en", Record<string, string>> = {
     "hrFeishuLastSync": "最近同步",
     "hrFeishuNeverSynced": "尚未从飞书同步",
     "hrFeishuSyncSummary": "{at} · 新增 {inserted} · 更新 {updated} · 跳过 {skipped}",
-    "hrFeishuSyncDone": "同步完成：新增 {inserted} · 更新 {updated} · 跳过 {skipped}"
+    "hrFeishuSyncDone": "同步完成：新增 {inserted} · 更新 {updated} · 跳过 {skipped}",
+    "hrAttendanceSyncNow": "立即从飞书同步",
+    "hrAttendanceSyncing": "同步中…",
+    "hrAttendanceSyncOff": "未开启飞书自动同步",
+    "hrAttendanceSyncNever": "已开启 · 尚未同步",
+    "hrAttendanceSyncBatch": "{period} 已同步 {matched} 人",
+    "hrAttendanceSyncDone": "同步完成：{period} 匹配 {matched} 人",
+    "hrAttendanceSyncFailed": "同步失败"
   },
   "en": {
     "documentTitle": "Talent Hub | Evidence-led screening",
@@ -908,6 +915,13 @@ export const messages: Record<"zh-CN" | "en", Record<string, string>> = {
     "hrFeishuLastSync": "Last sync",
     "hrFeishuNeverSynced": "Not synced from Feishu yet",
     "hrFeishuSyncSummary": "{at} · {inserted} added · {updated} updated · {skipped} skipped",
-    "hrFeishuSyncDone": "Sync finished: {inserted} added · {updated} updated · {skipped} skipped"
+    "hrFeishuSyncDone": "Sync finished: {inserted} added · {updated} updated · {skipped} skipped",
+    "hrAttendanceSyncNow": "Sync attendance now",
+    "hrAttendanceSyncing": "Syncing…",
+    "hrAttendanceSyncOff": "Feishu auto-sync is off",
+    "hrAttendanceSyncNever": "Enabled · not synced yet",
+    "hrAttendanceSyncBatch": "{period}: {matched} matched",
+    "hrAttendanceSyncDone": "Sync finished: {period} matched {matched}",
+    "hrAttendanceSyncFailed": "Sync failed"
   }
 };

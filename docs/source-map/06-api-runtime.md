@@ -160,12 +160,14 @@ POST   /api/rubric/export                            导出评分标准
 ```text
 GET    /api/hr/dashboard                             员工、考勤与招聘三类摘要
 POST   /api/hr/feishu-employees/sync                 按飞书通讯录刷新员工档案
+POST   /api/hr/feishu-sync                           立即触发一轮飞书考勤打卡同步
 ```
 
 - `dashboard` 一次请求内分别读取考勤库与招聘库，不做任何写入：员工总数与在职数、部门分布、最近一个已完成批次的考勤汇总、候选人总数与阶段分布、筛选任务数，以及飞书凭证与员工同步状态。
-- 考勤部分取 `import_batch` 中按 `year`、`month`、`created_at` 排序最新的 `completed` 批次；没有该批次时 `latest_period` 为 `null`，出勤率与计数为 0。
+- 考勤部分取 `import_batch` 中按 `year`、`month`、`created_at` 排序最新的 `completed` 批次；没有该批次时 `latest_period` 为 `null`，出勤率与计数为 0。其中的 `attendance.feishu` 另带同步开关、引擎运行状态、最近错误与最新一个 `feishu-sync` 批次。
 - 员工同步复用「考勤管理」保存的飞书应用凭证，需要 `contact:contact.base:readonly` 权限，同步在 `run_in_threadpool` 中执行；凭证未配置返回 400，飞书侧拒绝返回 502 与可执行提示。
 - 工号是 `employee` 表的唯一键，也是飞书考勤按工号取数的前提：成员缺工号或缺姓名时跳过并计入 `skipped`，只按工号更新或新增，不删除本地已有员工。
+- 考勤同步同样在 `run_in_threadpool` 中执行一轮 `FeishuSyncEngine.sync_once()`，返回其结果字典：未配置、未开启或没有在职员工时是 `ok: false` 与 `detail`，属正常状态因而仍返回 200；引擎未初始化返回 503。
 
 考勤（`app/attendance/routes.py`）使用独立的账号体系，除 `login` 外的端点都要带 `X-Attendance-Token`：
 

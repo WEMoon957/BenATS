@@ -174,6 +174,7 @@ Open it from the "HR center" entry in the top-bar "New" tool strip for a single-
 | **Sync employees from Feishu** | Refreshes employee records from the Feishu directory in one click: the department tree and members come from Feishu, and records are created or updated by employee number with name, department, position, mobile, join date, and employment status. Aliases, tags, attendance policies, and expected-day overrides keep their local values. Requires the `contact:contact.base:readonly` permission on the Feishu app, followed by a republish. |
 | **Employee info** | Active and total employee counts plus a department distribution bar chart, taken from the attendance employee records, which can be written by the Feishu sync or maintained by hand under Attendance management → Employees. |
 | **Attendance summary** | Attendance rate, items to review, and cross-day candidates for the most recent completed batch, labelled with its period; when no batch is completed it reports that no attendance data is available. |
+| **Feishu attendance sync** | The attendance card shows whether automatic Feishu sync is on, the last error, and the most recent synced batch, and offers "Sync attendance now" to pull one round of check-ins; matching is by employee number against active employees. |
 | **Recruitment progress** | Candidate total, screening-task count, and the candidate stage distribution. |
 
 > [!NOTE]

@@ -1423,7 +1423,7 @@ def create_app(data_dir: Path | None = None, app_token: str | None = None) -> Fa
 
     register_attendance_routes(app, attendance_store, feishu_sync)
     register_recruitment_routes(app, recruitment_store)
-    register_hr_routes(app, attendance_store, recruitment_store, repository)
+    register_hr_routes(app, attendance_store, recruitment_store, repository, feishu_sync)
 
     app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
     return app

@@ -34,7 +34,7 @@
 | `app/rubric/` | 评分标准的模型（`models.py`）、生成/解析/打分（`service.py`）与导出（`export.py`） | 评分标准界面、候选人预评分 |
 | `app/attendance/` | 考勤 SQLite 存储与账号角色（`db.py`）、打卡解析与核算（`services.py`）、路由与认证（`routes.py`）、核算表导出（`exporter.py`）、飞书同步（`feishu.py`、`sync.py`） | 考勤界面、飞书考勤数据 |
 | `app/attendance/feishu_contacts.py` | 飞书通讯录客户端（部门树递归、成员分页）与员工档案同步：按工号建档或刷新飞书人事字段，保留本地专有字段 | 员工档案、人事中台同步入口、飞书通讯录权限 |
-| `app/hr.py` | 人事中台看板聚合：员工规模与部门分布、最近一个已完成批次的考勤汇总、候选人阶段分布与筛选任务数；并提供从飞书通讯录刷新员工档案的写入口 | `attendance.db`、`recruitment.db`、任务仓储、飞书通讯录、人事中台视图 |
+| `app/hr.py` | 人事中台看板聚合：员工规模与部门分布、最近一个已完成批次的考勤汇总、候选人阶段分布与筛选任务数；并提供从飞书通讯录刷新员工档案、触发一轮飞书考勤同步的写入口 | `attendance.db`、`recruitment.db`、任务仓储、飞书通讯录与考勤同步引擎、人事中台视图 |
 | `frontend/src/` | React + TypeScript 前端；`App.tsx` 负责外壳和协调，`views/` 负责业务视图，`ui/` 负责对话框与基础组件 | 后端路由、字段、状态枚举和前端验证 |
 | `launcher.py` | PyInstaller 启动入口 | `app.main.main()`、打包配置 |
 | `start-app.bat` | 启动后端和 `vite build --watch`；前端依赖需已安装 | 本地开发启动 |
@@ -78,7 +78,7 @@
 - `frontend/src/views/RecruitmentWorkbench.tsx` 是招聘工作台入口，内含「作业台 / 触达审核 / 候选人 / 电话约谈 / 评分标准」五个 Tab。
 - `frontend/src/views/RecruitmentWizard.tsx` 负责招聘作业的创建与执行前检查；`BossView.tsx` 负责引擎状态、目标岗位与触达审核；`CandidateView.tsx` 负责候选人阶段看板与阶段推进；`CallsView.tsx` 负责电话约谈列表；`RubricView.tsx` 负责评分标准上传、生成与打分。
 - `frontend/src/views/AttendanceView.tsx` 负责考勤账号登录、员工与考勤规则、打卡表导入、核算结果与飞书同步；其认证 token 独立于 `X-App-Token`。
-- `frontend/src/views/HRCenterView.tsx` 渲染人事中台看板，以三块卡片展示员工、考勤与招聘摘要，数据来自 `/api/hr/dashboard`，进入视图时刷新；员工卡片内的「从飞书同步员工」提交 `/api/hr/feishu-employees/sync` 后重载看板。
+- `frontend/src/views/HRCenterView.tsx` 渲染人事中台看板，以三块卡片展示员工、考勤与招聘摘要，数据来自 `/api/hr/dashboard`，进入视图时刷新；员工卡片内的「从飞书同步员工」提交 `/api/hr/feishu-employees/sync`，考勤卡片内的「立即从飞书同步」提交 `/api/hr/feishu-sync`，两者完成后都重载看板。
 
 前端单元与契约测试位于 `frontend/tests/`；后端契约、状态、并发和发布验证位于 `tests/` 与 `scripts/verify_*`。文档只描述测试锁定的行为范围，不固定用例数量。
 
