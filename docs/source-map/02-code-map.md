@@ -33,6 +33,7 @@
 | `app/recruitment/` | 候选人 SQLite 存储与阶段状态机（`db.py`）、预评分与招呼草稿（`services.py`、`scoring.py`）、招聘作业 Plan（`plans.py`）与候选人路由（`routes.py`） | 候选人跟进界面、自动化引擎、筛选流水线入口 |
 | `app/rubric/` | 评分标准的模型（`models.py`）、生成/解析/打分（`service.py`）与导出（`export.py`） | 评分标准界面、候选人预评分 |
 | `app/attendance/` | 考勤 SQLite 存储与账号角色（`db.py`）、打卡解析与核算（`services.py`）、路由与认证（`routes.py`）、核算表导出（`exporter.py`）、飞书同步（`feishu.py`、`sync.py`） | 考勤界面、飞书考勤数据 |
+| `app/hr.py` | 人事中台看板的只读聚合：员工规模与部门分布、最近一个已完成批次的考勤汇总、候选人阶段分布与筛选任务数 | `attendance.db`、`recruitment.db`、任务仓储、人事中台视图 |
 | `frontend/src/` | React + TypeScript 前端；`App.tsx` 负责外壳和协调，`views/` 负责业务视图，`ui/` 负责对话框与基础组件 | 后端路由、字段、状态枚举和前端验证 |
 | `launcher.py` | PyInstaller 启动入口 | `app.main.main()`、打包配置 |
 | `start-app.bat` | 启动后端和 `vite build --watch`；前端依赖需已安装 | 本地开发启动 |
@@ -64,8 +65,8 @@
 
 - `frontend/src/api/client.ts` 是唯一 API client，负责 `X-App-Token`、JSON Content-Type、非 JSON 响应和 `detail` 错误透传。
 - `frontend/src/i18n/messages.ts` 是手工维护的双语消息源；新增或修改 key 时同步维护 `zh-CN` 与 `en`。`frontend/src/i18n/index.ts` 读写 `state.language`、持久化语言并广播变化。
-- `frontend/src/router/index.ts` 管理 screening/phone/recruitment/attendance 视图生命周期；`currentView()` 是轮询丢弃跨视图响应的判断来源。各视图在自己的 `exit` 停止所属轮询。
-- `frontend/src/App.tsx` 渲染外壳、顶栏、语言、设置、任务记录与业务视图；启动 effect 请求 `GET /api/bootstrap`。顶栏「新建」工具条只提供「招聘工作台」与「考勤管理」两个入口；简历筛选与电话确认由任务记录抽屉打开。筛选子页面使用 React `view` 状态和 `showSection()` 切换，router 将它们归为同一个 screening 生命周期。
+- `frontend/src/router/index.ts` 管理 screening/phone/recruitment/attendance/hrcenter 视图生命周期；`currentView()` 是轮询丢弃跨视图响应的判断来源。各视图在自己的 `exit` 停止所属轮询。
+- `frontend/src/App.tsx` 渲染外壳、顶栏、语言、设置、任务记录与业务视图；启动 effect 请求 `GET /api/bootstrap`。顶栏「新建」工具条提供「招聘工作台」「简历筛选」「电话确认」「考勤管理」「人事中台」五个入口；任务记录抽屉可直接打开简历筛选与电话确认任务。筛选子页面使用 React `view` 状态和 `showSection()` 切换，router 将它们归为同一个 screening 生命周期。
 - `frontend/src/ui/SettingsDialog.tsx` 使用同一个 `buildPayload()` 构造保存、模型测试和飞书测试请求；密钥框不回填明文，空值表示保留，清除按钮提交一次性 `clear_*` 标志。
 - `frontend/src/ui/HistoryDrawer.tsx` 负责 Job/Call 最近与归档列表、分页、归档、恢复和删除；打开任务通过 props 交给 `App.tsx`，不直接依赖业务视图。
 - `frontend/src/ui/PreviewDialog.tsx` 预览筛选标准与工作簿；`CompareDialog.tsx` 发起和取消 A/B 候选人横向对比；基础组件集中在 `frontend/src/ui/`。
@@ -76,6 +77,7 @@
 - `frontend/src/views/RecruitmentWorkbench.tsx` 是招聘工作台入口，内含「作业台 / 触达审核 / 候选人 / 电话约谈 / 评分标准」五个 Tab。
 - `frontend/src/views/RecruitmentWizard.tsx` 负责招聘作业的创建与执行前检查；`BossView.tsx` 负责引擎状态、目标岗位与触达审核；`CandidateView.tsx` 负责候选人阶段看板与阶段推进；`CallsView.tsx` 负责电话约谈列表；`RubricView.tsx` 负责评分标准上传、生成与打分。
 - `frontend/src/views/AttendanceView.tsx` 负责考勤账号登录、员工与考勤规则、打卡表导入、核算结果与飞书同步；其认证 token 独立于 `X-App-Token`。
+- `frontend/src/views/HRCenterView.tsx` 渲染人事中台看板，以三块只读卡片展示员工、考勤与招聘摘要，数据来自 `/api/hr/dashboard`，进入视图时刷新。
 
 前端单元与契约测试位于 `frontend/tests/`；后端契约、状态、并发和发布验证位于 `tests/` 与 `scripts/verify_*`。文档只描述测试锁定的行为范围，不固定用例数量。
 

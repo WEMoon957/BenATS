@@ -17,6 +17,7 @@ import { ScreeningView } from "./views/ScreeningView";
 import { PhoneView } from "./views/PhoneView";
 import { RecruitmentWorkbench } from "./views/RecruitmentWorkbench";
 import { AttendanceView } from "./views/AttendanceView";
+import { HRCenterView } from "./views/HRCenterView";
 
 /** 视图名 → section id（与 src/router 的 SECTION_IDS 对应） */
 const VIEW_SECTIONS: Record<string, string> = {
@@ -27,6 +28,7 @@ const VIEW_SECTIONS: Record<string, string> = {
   phone: "phoneView",
   recruitment: "recruitmentView",
   attendance: "attendanceView",
+  hrcenter: "hrCenterView",
 };
 
 /** 视图名 → body[data-view] 写入值（criteriaReview 对应 review） */
@@ -38,6 +40,7 @@ const VIEW_DATA_VIEW: Record<string, string> = {
   phone: "phone",
   recruitment: "recruitment",
   attendance: "attendance",
+  hrcenter: "hrcenter",
 };
 
 /** 任务状态 → 视图名（completed/有结果的 failed → results，waiting → criteriaReview，其余 → progress） */
@@ -84,7 +87,9 @@ export function App() {
           ? "recruitment"
           : name === "attendance"
             ? "attendance"
-            : "screening"
+            : name === "hrcenter"
+              ? "hrcenter"
+              : "screening"
     );
     const sectionId = VIEW_SECTIONS[name];
     if (sectionId) showSection(sectionId);
@@ -222,6 +227,8 @@ export function App() {
           navigate("attendance");
         } else if (activeTool === "phone") {
           navigate("phone");
+        } else if (activeTool === "hrcenter") {
+          navigate("hrcenter");
         } else {
           const lastJobId = localStorage.getItem("talentHub.lastJob");
           if (lastJobId) {
@@ -263,8 +270,8 @@ export function App() {
     setToolStripOpen((open) => !open);
   };
 
-  /** 工具切换：招聘工作台 / 简历筛选（重置筛选工作区）/ 电话确认（重置电话工作区）/ 考勤 */
-  const switchTool = (tool: "recruitment" | "screening" | "phone" | "attendance") => {
+  /** 工具切换：招聘工作台 / 简历筛选（重置筛选工作区）/ 电话确认（重置电话工作区）/ 考勤 / 人事中台 */
+  const switchTool = (tool: "recruitment" | "screening" | "phone" | "attendance" | "hrcenter") => {
     setToolStripOpen(false);
     localStorage.setItem("talentHub.activeTool", tool);
     localStorage.removeItem("talentHub.lastCall");
@@ -276,6 +283,8 @@ export function App() {
     } else if (tool === "phone") {
       resetPhoneWorkspace();
       navigate("phone");
+    } else if (tool === "hrcenter") {
+      navigate("hrcenter");
     } else {
       navigate("attendance");
     }
@@ -302,19 +311,23 @@ export function App() {
   const activeTool =
     activeToolRaw === "attendance"
       ? "attendance"
-      : activeToolRaw === "recruitment"
-        ? "recruitment"
-        : activeToolRaw === "phone"
-          ? "phone"
-          : "screening";
+      : activeToolRaw === "hrcenter"
+        ? "hrcenter"
+        : activeToolRaw === "recruitment"
+          ? "recruitment"
+          : activeToolRaw === "phone"
+            ? "phone"
+            : "screening";
   const viewTitle =
     view === "recruitment"
       ? "招聘工作台"
       : view === "attendance"
         ? t("toolAttendance")
-        : view !== null && view !== "phone" && view !== "setup" && state.currentJob
-          ? displayJobTitle(String(state.currentJob.title ?? ""))
-          : t("jobTitle");
+        : view === "hrcenter"
+          ? t("toolHrCenter")
+          : view !== null && view !== "phone" && view !== "setup" && state.currentJob
+            ? displayJobTitle(String(state.currentJob.title ?? ""))
+            : t("jobTitle");
 
   if (exited) {
     return (
@@ -404,6 +417,21 @@ export function App() {
               <svg aria-hidden="true" viewBox="0 0 24 24">
                 <rect x="3" y="5" width="18" height="16" rx="2" />
                 <path d="M8 3v4M16 3v4M3 10h18" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              data-tool="hrcenter"
+              className={activeTool === "hrcenter" ? "active" : ""}
+              title={t("toolHrCenter")}
+              aria-label={t("toolHrCenter")}
+              onClick={() => switchTool("hrcenter")}
+            >
+              <svg aria-hidden="true" viewBox="0 0 24 24">
+                <rect x="3" y="3" width="7" height="7" rx="1.5" />
+                <rect x="14" y="3" width="7" height="7" rx="1.5" />
+                <rect x="3" y="14" width="7" height="7" rx="1.5" />
+                <rect x="14" y="14" width="7" height="7" rx="1.5" />
               </svg>
             </button>
           </div>
@@ -506,6 +534,7 @@ export function App() {
           />
           <RecruitmentWorkbench onToast={showToast} />
           <AttendanceView onToast={showToast} />
+          <HRCenterView onToast={showToast} />
         </div>
       </main>
 

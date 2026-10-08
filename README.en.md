@@ -64,6 +64,7 @@ BenATS runs hiring as one trackable funnel — source → pre-score → greet �
 | **Delivering results** | Produces one unified evaluation outcome and shortlist |
 | **Sharing results** | Pushes the result summary to a Feishu group when a task finishes |
 | **Attendance accounting** | Syncs Feishu check-ins automatically, matches employees, and computes attendance; only cross-day anomalies need human review |
+| **At-a-glance overview** | The HR center aggregates employee, attendance, and recruitment summaries on one screen for a cross-cutting view of workforce and hiring progress |
 
 ## Current capabilities
 
@@ -163,6 +164,19 @@ Zhaopin is integrated through a separately deployed zhaopin-cli, which exposes t
 | **Cross-day anomaly review** | Detects cross-day candidates from "next-day" records and small-hours check-ins; a human decides whether to attribute them to the previous day or keep them on the current day. |
 | **Accounting & export** | Computes attendance days from the policy and supports manual adjustment, confirmation, rule tracing, and an Excel summary export (summary / detail / raw check-ins). |
 | **Attendance dashboard** | Supports cross-month queries and department filters, with a daily attendance-rate line chart, department comparison, and import summary. |
+
+### HR center
+
+Open it from the "HR center" entry in the top-bar "New" tool strip for a single-screen view of the HR picture. The dashboard is read-only: every figure comes from the local attendance and recruitment stores, and it triggers no sync or write.
+
+| Capability | Description |
+| --- | --- |
+| **Employee info** | Active and total employee counts plus a department distribution bar chart, taken from the attendance employee records. |
+| **Attendance summary** | Attendance rate, items to review, and cross-day candidates for the most recent completed batch, labelled with its period; when no batch is completed it reports that no attendance data is available. |
+| **Recruitment progress** | Candidate total, screening-task count, and the candidate stage distribution. |
+
+> [!NOTE]
+> The HR center reuses the application session token and adds no separate account system; attendance detail and manual review stay in Attendance management.
 
 ## Technical highlights
 

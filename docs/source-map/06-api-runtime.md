@@ -155,6 +155,15 @@ POST   /api/rubric/parse                             解析上传的评分标准
 POST   /api/rubric/export                            导出评分标准
 ```
 
+人事中台（`app/hr.py`）为只读聚合看板，与其他 `/api/` 一样只校验 `X-App-Token`：
+
+```text
+GET    /api/hr/dashboard                             员工、考勤与招聘三类摘要
+```
+
+- 一次请求内分别读取考勤库与招聘库，不做任何写入：员工总数与在职数、部门分布、最近一个已完成批次的考勤汇总、候选人总数与阶段分布、筛选任务数。
+- 考勤部分取 `import_batch` 中按 `year`、`month`、`created_at` 排序最新的 `completed` 批次；没有该批次时 `latest_period` 为 `null`，出勤率与计数为 0。
+
 考勤（`app/attendance/routes.py`）使用独立的账号体系，除 `login` 外的端点都要带 `X-Attendance-Token`：
 
 ```text

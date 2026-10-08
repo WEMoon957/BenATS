@@ -50,6 +50,7 @@ from .attendance.routes import register_routes as register_attendance_routes
 from .attendance.sync import FeishuSyncEngine
 from .recruitment.db import get_store as get_recruitment_store
 from .recruitment.routes import register_routes as register_recruitment_routes
+from .hr import register_hr_routes
 from .recruitment.services import auto_score_candidates
 from .recruitment.plans import (
     PLAN_STATE_RUNNING,
@@ -1422,6 +1423,7 @@ def create_app(data_dir: Path | None = None, app_token: str | None = None) -> Fa
 
     register_attendance_routes(app, attendance_store, feishu_sync)
     register_recruitment_routes(app, recruitment_store)
+    register_hr_routes(app, attendance_store, recruitment_store, repository)
 
     app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
     return app
