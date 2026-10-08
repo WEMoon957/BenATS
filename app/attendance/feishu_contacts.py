@@ -225,7 +225,8 @@ def _to_employee(user: dict, department_names: dict[str, str]) -> dict:
             break
     return {
         "employee_no": str(user.get("employee_no") or "").strip(),
-        "feishu_user_id": str(user.get("open_id") or user.get("user_id") or "").strip(),
+        "feishu_user_id": str(user.get("user_id") or "").strip(),
+        "feishu_open_id": str(user.get("open_id") or "").strip(),
         "name": str(user.get("name") or "").strip(),
         "department": department,
         "position": str(user.get("job_title") or "").strip(),
@@ -248,6 +249,22 @@ def _employment_status(active: bool, current: str) -> str:
     return current if current and current != "left" else "regular"
 
 
+def _find_existing(store, item: dict, employee_no: str):
+    """按新键找已有档案，找不到再按飞书用户 ID、open_id 找。
+
+    兜底键从 open_id 换成飞书用户 ID 时靠这一步认回原档案，不会产生重复人员。
+    """
+    for candidate in (employee_no, item["feishu_user_id"], item["feishu_open_id"]):
+        if not candidate:
+            continue
+        row = store.query_one(
+            "SELECT id, employment_status FROM employee WHERE employee_no = ?", (candidate,)
+        )
+        if row:
+            return row
+    return None
+
+
 def sync_employees(store, client: FeishuContactsClient) -> dict:
     """把飞书成员写入 employee 表并按工号归档，返回本次同步的计数摘要。
 
@@ -260,23 +277,22 @@ def sync_employees(store, client: FeishuContactsClient) -> dict:
     skipped = 0
     fallback_user_id = 0
     for item in employees:
-        # 工号是 employee 表的唯一键，也是飞书考勤按工号取数的前提；飞书没填工号时退回用户 ID
-        employee_no = item["employee_no"] or item["feishu_user_id"]
+        # 唯一键优先用飞书工号；没有工号时用飞书用户 ID（考勤接口支持按它取数），最后才是 open_id
+        employee_no = item["employee_no"] or item["feishu_user_id"] or item["feishu_open_id"]
         if not employee_no or not item["name"]:
             skipped += 1
             continue
         if not item["employee_no"]:
             fallback_user_id += 1
-        existing = store.query_one(
-            "SELECT id, employment_status FROM employee WHERE employee_no = ?", (employee_no,)
-        )
+        existing = _find_existing(store, item, employee_no)
         status = _employment_status(item["active"], str((existing or {}).get("employment_status") or ""))
         if existing:
             store.execute(
-                "UPDATE employee SET name = ?, department = ?, position = ?, phone = ?, "
+                "UPDATE employee SET employee_no = ?, name = ?, department = ?, position = ?, phone = ?, "
                 "join_date = COALESCE(?, join_date), employment_status = ?, active = ?, updated_at = ? "
                 "WHERE id = ?",
                 (
+                    employee_no,
                     item["name"],
                     item["department"],
                     item["position"],

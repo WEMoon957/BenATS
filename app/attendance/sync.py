@@ -15,7 +15,13 @@ import threading
 from datetime import date, datetime
 
 from .db import AttendanceStore, _now
-from .feishu import CHINA_TZ, FeishuAttendanceClient, FeishuAttendanceError, timestamp_to_punch
+from .feishu import (
+    CHINA_TZ,
+    EMPLOYEE_ID,
+    FeishuAttendanceClient,
+    FeishuAttendanceError,
+    timestamp_to_punch,
+)
 from .services import (
     STATUS_COMPLETED,
     STATUS_FAILED,
@@ -92,7 +98,13 @@ class FeishuSyncEngine:
         date_from = f"{year}{month:02d}01"
         date_to = f"{year}{month:02d}{days_in_month:02d}"
         try:
-            results = client.query_user_tasks(employee_nos, date_from, date_to)
+            results, invalid = client.query_user_tasks(employee_nos, date_from, date_to)
+            # 员工键可能是工号，也可能是飞书用户 ID：先按工号查，再把飞书判为无效的键按用户 ID 查一次
+            if invalid:
+                fallback, _ = client.query_user_tasks(
+                    invalid, date_from, date_to, employee_type=EMPLOYEE_ID
+                )
+                results.extend(fallback)
         except FeishuAttendanceError as exc:
             self.last_error = str(exc)
             return {"ok": False, "detail": self.last_error}

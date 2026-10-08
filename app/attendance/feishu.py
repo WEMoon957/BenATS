@@ -21,6 +21,12 @@ BATCH_SIZE = 50
 # token 提前多少秒视为过期，强制刷新
 TOKEN_REFRESH_MARGIN = 120
 
+# 打卡结果接口支持的员工 ID 类型：工号，或飞书管理后台里的用户 ID
+EMPLOYEE_NO = "employee_no"
+EMPLOYEE_ID = "employee_id"
+# 所选类型下整批 ID 都无效时返回的业务码
+ALL_IDS_INVALID_CODE = 1220001
+
 
 class FeishuAttendanceError(Exception):
     def __init__(self, code, msg) -> None:
@@ -60,9 +66,21 @@ class FeishuAttendanceClient:
             self._token_expire_at = time.time() + int(data.get("expire", 7200))
             return self._token
 
-    def query_user_tasks(self, user_ids: list[str], date_from: str, date_to: str) -> list[dict]:
-        """按工号批量查询打卡结果，返回 user_task_results 列表（已合并分页）。"""
+    def query_user_tasks(
+        self,
+        user_ids: list[str],
+        date_from: str,
+        date_to: str,
+        *,
+        employee_type: str = EMPLOYEE_NO,
+    ) -> tuple[list[dict], list[str]]:
+        """按指定员工 ID 类型批量查询打卡结果（已合并分页）。
+
+        返回 `(user_task_results, 飞书判定为无效的 ID)`。所选类型下整批都无效时飞书返回
+        `ALL_IDS_INVALID_CODE`，这里不抛错，改为把整批 ID 交回调用方换另一种类型兜底。
+        """
         results: list[dict] = []
+        invalid: list[str] = []
         for start in range(0, len(user_ids), BATCH_SIZE):
             batch = user_ids[start:start + BATCH_SIZE]
             token = self._get_token()
@@ -70,7 +88,7 @@ class FeishuAttendanceClient:
                 response = httpx.post(
                     USER_TASKS_URL,
                     params={
-                        "employee_type": "employee_no",
+                        "employee_type": employee_type,
                         "ignore_invalid_users": "true",
                         "include_terminated_user": "false",
                     },
@@ -87,10 +105,14 @@ class FeishuAttendanceClient:
                 raise FeishuAttendanceError("network", f"查询打卡结果失败：{exc}") from exc
             data = _json(response)
             if data.get("code") != 0:
+                if data.get("code") == ALL_IDS_INVALID_CODE:
+                    invalid.extend(batch)
+                    continue
                 raise FeishuAttendanceError(data.get("code"), data.get("msg", "查询打卡结果失败"))
-            chunk = data.get("data", {}).get("user_task_results") or []
-            results.extend(chunk)
-        return results
+            body = data.get("data") or {}
+            results.extend(body.get("user_task_results") or [])
+            invalid.extend(body.get("invalid_user_ids") or [])
+        return results, invalid
 
 
 def _json(response: httpx.Response) -> dict:

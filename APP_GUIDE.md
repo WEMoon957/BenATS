@@ -300,14 +300,14 @@ print(result["job_id"], result["resumes_imported"], result["errors"])
 把飞书通讯录里的成员批量写入员工档案，省去逐条手工建档。
 
 1. 先在「考勤管理 → 设置」中填写飞书企业自建应用的 App ID 与 App Secret（与考勤自动同步共用同一套凭证）。
-2. 在飞书开放平台逐项开通**通讯录字段权限**：`contact:user.base:readonly`（姓名）、`contact:user.employee:readonly`（工号、职务、入职时间、在职状态）、`contact:user.department:readonly`（所属部门）、`contact:department.base:readonly`（部门名称）；需要手机号再开通 `contact:user.phone:readonly`。飞书已不再提供 `contact:contact:readonly` 这类宽泛权限，而 `contact:contact.base:readonly` 只管接口能否调用、**不含上述任何字段**——只开它时接口能调通，但返回体里姓名与工号都是空，同步会把成员全部跳过。
+2. 在飞书开放平台逐项开通**通讯录字段权限**：`contact:user.base:readonly`（姓名）、`contact:user.employee:readonly`（工号、职务、入职时间、在职状态）、`contact:user.department:readonly`（所属部门）、`contact:department.base:readonly`（部门名称）；需要手机号再开通 `contact:user.phone:readonly`；希望成员没有工号也能拉到打卡，再开通 `contact:user.employee_id:readonly`（飞书用户 ID 的字段权限）。飞书已不再提供 `contact:contact:readonly` 这类宽泛权限，而 `contact:contact.base:readonly` 只管接口能否调用、**不含上述任何字段**——只开它时接口能调通，但返回体里姓名与工号都是空，同步会把成员全部跳过。
 3. 在「开发配置 → 权限管理 → 数据权限」中把**通讯录权限范围**设为**全部成员**：查询根部门下的子部门要求全员范围，否则会报无部门权限。
 4. 重新发布应用版本，等管理员审批通过后权限才生效。
 5. 回到「人事中台」，点击员工信息卡片中的「从飞书同步员工」。完成后按钮旁显示最近一次同步的时间与新增 / 更新 / 跳过计数。
 
 同步规则：
 
-- 以工号为唯一键建档。**飞书成员没填工号时，改用飞书用户 ID 建档**（员工列表的「工号」列会显示 `ou_…`），同步行会标出这类人数；这些人不会进入飞书考勤按工号的取数，拿不到打卡。读不到姓名的成员跳过，计入「跳过」。
+- 以工号为唯一键建档。**飞书成员没填工号时，改用飞书用户 ID 建档**（员工列表的「工号」列会显示该 ID），同步行会标出这类人数。飞书考勤按「工号」查不到时会自动改用「用户 ID」再查一次，所以没有工号也能拉到打卡；这需要额外开通字段权限 `contact:user.employee_id:readonly`。读不到姓名的成员跳过，计入「跳过」。
 - 飞书返回的成员**全部**读不到姓名时，同步直接报错指向字段权限，而不是记一条「新增 0」的空摘要。
 - 姓名、部门、岗位、手机号、入职日期与在职状态以飞书为准；成员离职或主动退出时状态记为「已离职」并置为非在职。飞书里「未加入」（等待本人确认加入企业）的成员同样不计入在职；账号处于「暂停」的成员仍算在职员工。
 - 本地专有字段不被覆盖：别名、标签、考勤策略与应出勤天数覆盖保持原值；手动设置的「试用期」等在职状态也不会被在职成员覆盖。

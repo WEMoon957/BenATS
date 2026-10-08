@@ -96,6 +96,19 @@ def _client(handler=_handler) -> FeishuContactsClient:
     )
 
 
+def _single_member_client(member: dict) -> FeishuContactsClient:
+    """只返回一个成员的客户端：部门树为空，成员列表只有该成员。"""
+
+    def handler(request):
+        if request.url.path == TOKEN_PATH:
+            return _token_response()
+        if _children_department(request.url.path) is not None:
+            return httpx.Response(200, json={"code": 0, "data": {"items": [], "has_more": False}})
+        return httpx.Response(200, json={"code": 0, "data": {"items": [member], "has_more": False}})
+
+    return _client(handler)
+
+
 def _store(tmp_path) -> AttendanceStore:
     store = AttendanceStore(tmp_path / "attendance.db")
     store.initialize()
@@ -149,7 +162,8 @@ def test_fetch_employees_maps_feishu_fields():
     by_no = {item["employee_no"]: item for item in _client().fetch_employees() if item["employee_no"]}
     assert by_no["E001"] == {
         "employee_no": "E001",
-        "feishu_user_id": "ou-1",
+        "feishu_user_id": "",
+        "feishu_open_id": "ou-1",
         "name": "张三",
         "department": "技术部",
         "position": "后端工程师",
@@ -157,6 +171,23 @@ def test_fetch_employees_maps_feishu_fields():
         "join_date": "2024-01-01",
         "active": True,
     }
+
+
+def test_fetch_employees_keeps_open_id_and_user_id_apart():
+    """飞书用户 ID（考勤接口支持的 employee_id）与 open_id 分开保留。"""
+    member = {
+        "open_id": "ou-1",
+        "user_id": "u-1",
+        "name": "张三",
+        "employee_no": "",
+        "department_ids": [],
+        "status": {},
+    }
+
+    mapped = _single_member_client(member).fetch_employees()[0]
+
+    assert mapped["feishu_user_id"] == "u-1"
+    assert mapped["feishu_open_id"] == "ou-1"
 
 
 def test_fetch_employees_marks_exited_member_inactive():
@@ -349,6 +380,45 @@ def test_sync_employees_inserts_members_and_falls_back_to_user_id(tmp_path):
     assert rows["E003"]["employment_status"] == "left"
 
 
+def test_sync_employees_keys_by_feishu_user_id_when_no_employee_no(tmp_path):
+    """没工号时用飞书用户 ID 建档（考勤接口能按它取数），而不是 open_id。"""
+    store = _store(tmp_path)
+    member = {
+        "open_id": "ou-1",
+        "user_id": "u-1",
+        "name": "张三",
+        "employee_no": "",
+        "department_ids": [],
+        "status": {},
+    }
+
+    summary = sync_employees(store, _single_member_client(member))
+
+    assert summary["inserted"] == 1
+    assert summary["fallback_user_id"] == 1
+    assert [row["employee_no"] for row in store.query("SELECT employee_no FROM employee")] == ["u-1"]
+
+
+def test_sync_employees_migrates_open_id_key_to_feishu_user_id(tmp_path):
+    """先前按 open_id 建过档，拿到用户 ID 后再同步应认回原档案，不产生重复人员。"""
+    store = _store(tmp_path)
+    _insert_employee(store, employee_no="ou-1", name="张三")
+    member = {
+        "open_id": "ou-1",
+        "user_id": "u-1",
+        "name": "张三",
+        "employee_no": "",
+        "department_ids": [],
+        "status": {},
+    }
+
+    summary = sync_employees(store, _single_member_client(member))
+
+    assert summary["inserted"] == 0
+    assert summary["updated"] == 1
+    assert [row["employee_no"] for row in store.query("SELECT employee_no FROM employee")] == ["u-1"]
+
+
 def test_sync_employees_reports_missing_name_as_field_permission_problem(tmp_path):
     """连姓名都读不到时，指向字段权限没开齐。"""
     store = _store(tmp_path)
@@ -453,8 +523,8 @@ def test_dashboard_reports_feishu_state(tmp_path, monkeypatch):
         "app.hr.FeishuContactsClient",
         lambda app_id, app_secret: _StubClient(
             [
-                {"employee_no": "E001", "name": "张三", "department": "技术部", "position": "",
-                 "phone": "", "join_date": None, "active": True}
+                {"employee_no": "E001", "feishu_user_id": "", "feishu_open_id": "", "name": "张三",
+                 "department": "技术部", "position": "", "phone": "", "join_date": None, "active": True}
             ]
         ),
     )
@@ -508,8 +578,8 @@ class _StubAttendanceClient:
         self.app_id = app_id
         self.app_secret = app_secret
 
-    def query_user_tasks(self, user_ids, date_from, date_to):
-        return []
+    def query_user_tasks(self, user_ids, date_from, date_to, *, employee_type="employee_no"):
+        return [], []
 
 
 def _enable_feishu_attendance(store) -> None:
@@ -550,6 +620,70 @@ def test_hr_attendance_sync_runs_engine_and_records_batch(tmp_path, monkeypatch)
     assert state["last_batch"]["period"] == body["period"]
     assert state["last_batch"]["status"] == "completed"
     assert state["last_batch"]["completed_at"]
+
+
+class _TwoPassAttendanceClient:
+    """工号整批无效、换用户 ID 后有效：验证第二段兜底查询确实发生。"""
+
+    calls: list = []
+
+    def __init__(self, app_id, app_secret) -> None:
+        self.app_id = app_id
+        self.app_secret = app_secret
+
+    def query_user_tasks(self, user_ids, date_from, date_to, *, employee_type="employee_no"):
+        _TwoPassAttendanceClient.calls.append((employee_type, list(user_ids)))
+        if employee_type == "employee_no":
+            return [], list(user_ids)
+        return [], []
+
+
+def test_hr_attendance_sync_retries_invalid_ids_as_feishu_user_id(tmp_path, monkeypatch):
+    client, headers, store = _boot(tmp_path, monkeypatch)
+    _enable_feishu_attendance(store)
+    _insert_employee(store)
+    _TwoPassAttendanceClient.calls = []
+    monkeypatch.setattr("app.attendance.sync.FeishuAttendanceClient", _TwoPassAttendanceClient)
+
+    response = client.post("/api/hr/feishu-sync", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+    assert [call[0] for call in _TwoPassAttendanceClient.calls] == ["employee_no", "employee_id"]
+    assert _TwoPassAttendanceClient.calls[1][1] == ["E001"]
+
+
+def test_attendance_query_reports_invalid_ids_and_tolerates_all_invalid(monkeypatch):
+    """整批无效时不再抛错，而是把整批 ID 交回调用方换类型兜底。"""
+    from app.attendance import feishu as attendance_feishu
+
+    responses = [
+        httpx.Response(
+            200,
+            json={"code": 0, "data": {"user_task_results": [{"user_id": "E001"}], "invalid_user_ids": ["u-9"]}},
+        ),
+        httpx.Response(200, json={"code": 1220001, "msg": "userIds all invalid"}),
+    ]
+    employee_types: list[str] = []
+
+    def fake_post(url, **kwargs):
+        employee_types.append(kwargs["params"]["employee_type"])
+        return responses[len(employee_types) - 1]
+
+    monkeypatch.setattr(attendance_feishu.httpx, "post", fake_post)
+    client = attendance_feishu.FeishuAttendanceClient("cli", "secret")
+    monkeypatch.setattr(client, "_get_token", lambda: "tenant-token")
+
+    results, invalid = client.query_user_tasks(["E001", "u-9"], "20261001", "20261002")
+    assert results == [{"user_id": "E001"}]
+    assert invalid == ["u-9"]
+
+    results, invalid = client.query_user_tasks(
+        ["ou-x"], "20261001", "20261002", employee_type="employee_id"
+    )
+    assert results == []
+    assert invalid == ["ou-x"]
+    assert employee_types == ["employee_no", "employee_id"]
 
 
 def test_hr_attendance_sync_reports_missing_config_without_error(tmp_path, monkeypatch):
