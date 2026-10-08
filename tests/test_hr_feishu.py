@@ -22,6 +22,7 @@ TOKEN_PATH = "/open-apis/auth/v3/tenant_access_token/internal"
 CHILDREN_PREFIX = "/open-apis/contact/v3/departments/"
 CHILDREN_SUFFIX = "/children"
 USERS_PATH = "/open-apis/contact/v3/users/find_by_department"
+SCOPES_PATH = "/open-apis/contact/v3/scopes"
 
 ROOT = "0"
 TECH = "od-tech"
@@ -286,6 +287,37 @@ def test_scope_range_denied_explains_permission_range(code):
     with pytest.raises(FeishuContactsError) as excinfo:
         _client(handler).list_departments()
     assert "通讯录权限范围" in str(excinfo.value)
+
+
+def test_scope_range_error_reports_authorized_scope():
+    """范围报错时补上实测授权范围，省得靠猜。"""
+
+    def handler(request):
+        if request.url.path == TOKEN_PATH:
+            return _token_response()
+        if request.url.path == SCOPES_PATH:
+            return httpx.Response(
+                200, json={"code": 0, "data": {"department_ids": [], "user_ids": ["ou-1"]}}
+            )
+        return httpx.Response(403, json={"code": 40004, "msg": "no dept authority error"})
+
+    with pytest.raises(FeishuContactsError) as excinfo:
+        _client(handler).list_departments()
+    assert "0 个部门、1 个用户" in str(excinfo.value)
+
+
+def test_scope_range_error_survives_scope_lookup_failure():
+    """授权范围读不到时保留原本的范围提示，不因诊断失败换个报错。"""
+
+    def handler(request):
+        if request.url.path == TOKEN_PATH:
+            return _token_response()
+        return httpx.Response(403, json={"code": 40004, "msg": "no dept authority error"})
+
+    with pytest.raises(FeishuContactsError) as excinfo:
+        _client(handler).list_departments()
+    assert "设为全部成员" in str(excinfo.value)
+    assert "无法读取" in str(excinfo.value)
 
 
 # ---- 员工档案同步 ----

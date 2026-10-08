@@ -21,6 +21,8 @@ DEPARTMENTS_CHILDREN_URL = (
     "https://open.feishu.cn/open-apis/contact/v3/departments/{department_id}/children"
 )
 DEPARTMENT_USERS_URL = "https://open.feishu.cn/open-apis/contact/v3/users/find_by_department"
+# 读取应用当前的通讯录授权范围，用于把无权限报错说清楚
+SCOPES_URL = "https://open.feishu.cn/open-apis/contact/v3/scopes"
 
 CHINA_TZ = timezone(timedelta(hours=8))
 PAGE_SIZE = 50
@@ -132,7 +134,20 @@ class FeishuContactsClient:
                 return
 
     def list_departments(self) -> list[dict]:
-        """从根部门递归收集全部子部门，返回 `{department_id, name}` 列表。"""
+        """从根部门递归收集全部子部门，返回 `{department_id, name}` 列表。
+
+        权限范围不含根部门时补上当前实际授权范围，让「该改哪个设置」不用靠猜。
+        """
+        try:
+            return self._walk_departments()
+        except FeishuContactsError as exc:
+            if exc.code in SCOPE_RANGE_CODES:
+                raise FeishuContactsError(
+                    exc.code, f"{exc.msg}；应用当前的通讯录权限范围：{self.scope_summary()}"
+                ) from exc
+            raise
+
+    def _walk_departments(self) -> list[dict]:
         departments: list[dict] = []
         queue = [ROOT_DEPARTMENT_ID]
         visited = {ROOT_DEPARTMENT_ID}
@@ -149,6 +164,22 @@ class FeishuContactsClient:
                 departments.append({"department_id": department_id, "name": str(item.get("name") or "")})
                 queue.append(department_id)
         return departments
+
+    def authorized_scope(self) -> dict:
+        """查询应用当前的通讯录授权范围（部门与用户）。"""
+        data = self._request(SCOPES_URL, {})
+        return {
+            "department_ids": [str(value) for value in data.get("department_ids") or []],
+            "user_ids": [str(value) for value in data.get("user_ids") or []],
+        }
+
+    def scope_summary(self) -> str:
+        """把授权范围压成一句话；读取失败时不掩盖原本的报错。"""
+        try:
+            scope = self.authorized_scope()
+        except FeishuContactsError:
+            return "无法读取"
+        return f"{len(scope['department_ids'])} 个部门、{len(scope['user_ids'])} 个用户"
 
     def list_users(self, department_id: str) -> list[dict]:
         """按部门拉取成员，已合并分页。"""
