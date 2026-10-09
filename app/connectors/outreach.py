@@ -11,6 +11,7 @@ from pathlib import Path
 
 from .boss_cli import BossCliConnector, BossCliError
 from .zhaopin_cli import ZhaopinCliConnector, ZhaopinCliError
+from ..db.json_backend import JsonMetadataBackend
 from ..repository import JsonStore, utc_now
 
 # 触达动作归属的招聘平台
@@ -44,8 +45,11 @@ class OutreachAction:
 class OutreachStore(JsonStore):
     """触达草稿仓储：每条草稿一个目录，状态机 pending → approved/rejected → sent/failed。"""
 
-    def __init__(self, root: Path) -> None:
-        super().__init__(root, subdir="outreaches", metadata_name="outreach.json", temp_prefix="outreach-")
+    def __init__(self, root: Path, *, backend: JsonMetadataBackend | None = None) -> None:
+        super().__init__(
+            root, subdir="outreaches", metadata_name="outreach.json", temp_prefix="outreach-",
+            kind="outreach", backend=backend,
+        )
 
     def _new_record(self, record_id: str, now: str, *, action: OutreachAction) -> dict:
         return {

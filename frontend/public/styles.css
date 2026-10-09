@@ -1064,6 +1064,63 @@ html:has(.preview-backdrop) {
 .call-concl-btn.active.is-pending { background: #a15c05; border-color: #a15c05; color: #fff; }
 .call-note { width: 100%; min-height: 60px; padding: 8px; border: 1px solid var(--line-strong); border-radius: 6px; font-size: 12px; resize: vertical; }
 
+/* ---- 人员流动看板 ---- */
+
+.hr-trend { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.hr-trend-row { display: grid; grid-template-columns: 64px 1fr auto; align-items: center; gap: 10px; }
+.hr-trend-month { font-size: 11px; color: var(--ink-soft); }
+.hr-trend-bars { display: flex; flex-direction: column; gap: 3px; }
+.hr-trend-in, .hr-trend-out { display: block; height: 7px; border-radius: 99px; min-width: 2px; }
+.hr-trend-in { background: var(--blue); }
+.hr-trend-out { background: var(--red); }
+.hr-trend-meta { font-size: 11px; color: var(--ink-soft); white-space: nowrap; }
+
+.hr-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.hr-table th { text-align: left; padding: 6px 8px; color: var(--muted); font-weight: var(--font-medium); border-bottom: 1px solid var(--line); }
+.hr-table td { padding: 6px 8px; border-bottom: 1px solid var(--line); color: var(--ink); vertical-align: middle; }
+.hr-table tr:last-child td { border-bottom: none; }
+
+.hr-events { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.hr-event { display: flex; align-items: center; gap: 8px; font-size: 11px; }
+.hr-event-date { color: var(--muted); }
+.hr-event-name { color: var(--ink); font-weight: var(--font-medium); }
+.hr-event-tag { padding: 1px 6px; border-radius: 99px; background: var(--surface-muted); color: var(--ink-soft); font-size: 10px; }
+.hr-event.is-onboard .hr-event-tag { background: var(--blue-soft); color: var(--blue-dark); }
+.hr-event.is-offboard .hr-event-tag { background: var(--red-soft); color: var(--red); }
+.hr-event-dept { color: var(--muted); }
+
+/* ---- 离职流程 ---- */
+
+.hr-resign-start { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+.hr-resign-start select { flex: 1 1 180px; height: 38px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 5px; background: #fff; color: var(--ink); font-size: 12px; font-family: inherit; }
+.hr-resign-table td { vertical-align: top; }
+.hr-resign-dept { display: block; color: var(--muted); font-size: 10px; }
+.hr-resign-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.hr-resign-actions .secondary-button, .hr-resign-actions .danger-button { min-height: 26px; padding: 0 10px; font-size: 11px; }
+.hr-badge { display: inline-block; padding: 2px 8px; border-radius: 99px; background: var(--surface-muted); color: var(--ink-soft); font-size: 10px; }
+.hr-badge.is-submitted { background: var(--gold-soft); color: var(--gold); }
+.hr-badge.is-confirmed { background: var(--blue-soft); color: var(--blue-dark); }
+.hr-badge.is-completed { background: var(--red-soft); color: var(--red); }
+.hr-badge.is-rejected { color: var(--muted); text-decoration: line-through; }
+.hr-badge.is-deliver-failed { margin-left: 4px; background: var(--red-soft); color: var(--red); }
+.hr-badge.is-deliver-manual { margin-left: 4px; background: var(--gold-soft); color: var(--gold); }
+.hr-status-value { font-size: 14px; line-height: 1.4; }
+.hr-error { margin: 8px 0 0; color: var(--red); font-size: 11px; line-height: 1.6; }
+
+/* ---- 离职填报表单（员工公开页） ---- */
+
+.resign-page { display: grid; place-items: center; min-height: 100vh; padding: 32px 16px; background: var(--canvas); }
+.resign-card { width: min(520px, 100%); display: grid; gap: 14px; padding: 28px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); box-shadow: var(--shadow); }
+.resign-card h1 { margin: 0; font-size: 20px; }
+.resign-lead { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.resign-employee { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 16px; margin: 0; padding: 14px 16px; border-radius: 8px; background: var(--surface-subtle); }
+.resign-employee dt { color: var(--muted); font-size: 10px; }
+.resign-employee dd { margin: 2px 0 0; color: var(--ink); font-size: 12px; }
+.resign-card textarea { width: 100%; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: 5px; background: #fff; color: var(--ink); outline: none; font-size: 12px; font-family: inherit; resize: vertical; }
+.resign-card .primary-button { min-height: 42px; justify-content: center; }
+.resign-error { margin: 0; color: var(--red); font-size: 12px; }
+.resign-hint { margin: 0; color: var(--muted); font-size: 10px; }
+
 @media (max-width: 720px) {
   .att-layout { grid-template-columns: 1fr; }
   .att-nav { flex-direction: row; overflow-x: auto; }
@@ -1071,4 +1128,62 @@ html:has(.preview-backdrop) {
   .att-kpis { grid-template-columns: repeat(2, 1fr); }
   .att-form-grid { grid-template-columns: 1fr; }
   .att-bar-row { grid-template-columns: 70px 1fr 48px; }
+  .resign-employee { grid-template-columns: 1fr; }
 }
+
+/* ---- 人事中台看板（滚动上限 / 筛选 / 常驻链接 / 非颜色冗余） ---- */
+
+/* 表格与列表加滚动上限，避免 200 条申请、20 个部门、长趋势把卡片无限撑高 */
+.hr-scroll { max-height: 420px; overflow-y: auto; }
+.hr-scroll-bars { max-height: 260px; }
+.hr-scroll-table { max-height: 300px; }
+.hr-scroll-trend { max-height: 300px; }
+.hr-scroll-events { max-height: 260px; }
+
+/* 覆盖全局 table{min-width:920px}：hr 表按容器宽度自适应换行，避免卡片内横向溢出 */
+.hr-table { min-width: 0; }
+.hr-resign-table { min-width: 0; }
+
+/* 常驻表单链接与复制 */
+.hr-resign-link-cell { min-width: 0; max-width: 260px; }
+.hr-resign-link { display: block; max-width: 240px; color: var(--blue-dark); font-size: 11px; text-decoration: underline; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hr-resign-copy { margin-top: 4px; min-height: 24px; padding: 0 8px; font-size: 10px; }
+
+/* 长文本（送达错误）改为可展开、键盘与触屏可达 */
+.hr-resign-error { margin-top: 6px; }
+.hr-resign-error summary { color: var(--red); font-size: 10px; cursor: pointer; }
+.hr-resign-error-text { display: block; margin-top: 4px; color: var(--ink-soft); font-size: 10px; line-height: 1.5; word-break: break-word; }
+
+/* 离职列表筛选 */
+.hr-resign-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 4px 0 12px; }
+.hr-resign-filter { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-soft); font-size: 11px; }
+.hr-resign-filter select { height: 32px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: 5px; background: #fff; color: var(--ink); font-size: 11px; }
+.hr-resign-filter-toggle input { width: auto; height: auto; }
+
+/* 首屏聚合 KPI 的跳转入口与基数说明 */
+.hr-kpi-link { margin-top: 6px; padding: 0; border: 0; background: none; color: var(--blue-dark); font-size: 10px; text-decoration: underline; cursor: pointer; }
+.hr-kpi-note { display: block; margin-top: 2px; color: var(--muted); font-size: 9px; }
+
+/* 卡片内错误态 + 重试 */
+.hr-error-panel { display: grid; gap: 12px; justify-items: start; margin-bottom: 20px; }
+.hr-inline-error { display: grid; gap: 8px; justify-items: start; margin: 8px 0 4px; }
+
+/* 跨卡跳转（未传 onNavigate 时退化为纯文本） */
+.hr-nav-hint { margin: 10px 0 0; color: var(--muted); font-size: 11px; }
+.hr-nav-link { margin-top: 10px; padding: 0; border: 0; background: none; color: var(--blue-dark); font-size: 11px; text-decoration: underline; cursor: pointer; }
+
+/* 趋势图例：颜色与文字一一对应，条加斜纹，灰度下仍可区分 */
+.hr-trend-legend { display: flex; gap: 14px; margin: 0 0 8px; color: var(--ink-soft); font-size: 10px; }
+.hr-trend-legend-item { display: inline-flex; align-items: center; gap: 5px; }
+.hr-trend-swatch { display: inline-block; width: 12px; height: 7px; border-radius: 99px; }
+.hr-trend-swatch.is-in { background: var(--blue); }
+.hr-trend-swatch.is-out { background: var(--red); background-image: repeating-linear-gradient(45deg, rgba(255, 255, 255, .55) 0 2px, transparent 2px 5px); }
+.hr-trend-out { background-image: repeating-linear-gradient(45deg, rgba(255, 255, 255, .55) 0 2px, transparent 2px 5px); }
+
+/* 离职流程：到期离职执行按钮 */
+.hr-resign-offboard { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line); }
+
+/* 首屏待办聚合条：独立于主网格，KPI 区不留底部间距；集成配置区与主网格拉开距离 */
+.hr-todo-bar .att-kpis { margin-bottom: 0; }
+.hr-center-view .hr-todo-bar { margin-bottom: 20px; }
+.hr-config-section { margin-top: 20px; }

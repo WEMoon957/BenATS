@@ -1,13 +1,16 @@
-"""人事中台看板：聚合员工、考勤与招聘三类摘要，供前端一览页渲染。
+"""人事中台看板与员工生命周期：聚合员工、考勤与招聘摘要，并承载离职表单流程。
 
-看板数据全部来自本地存储（考勤 attendance.db 与招聘 recruitment.db），
-不涉及考勤独立账号体系；「从飞书同步员工」是唯一写入口，按飞书通讯录刷新员工档案。
+看板数据全部来自本地存储（考勤 attendance.db 与招聘 recruitment.db）；
+「从飞书同步员工」与「飞书事件订阅」是员工档案的写入来源，离职表单流程由此发起。
+公开表单接口（/api/resignation/*）不校验登录会话，仅依赖应用内置令牌，供员工在
+浏览器打开链接后填写。
 """
 
 from __future__ import annotations
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
+from pydantic import BaseModel, Field
 
 from .attendance.feishu_contacts import (
     FeishuContactsClient,
@@ -15,12 +18,61 @@ from .attendance.feishu_contacts import (
     last_sync,
     sync_employees,
 )
+from .attendance.lifecycle import (
+    RESIGN_STATUS_LABELS,
+    employee_flow_dashboard,
+    list_events,
+)
+from .attendance.resignation import (
+    CONFIG_PUBLIC_BASE_URL,
+    REASON_CATEGORIES,
+    confirm_request,
+    create_request,
+    deliver_request,
+    get_by_token,
+    list_requests,
+    reject_request,
+    resolve_base_url,
+    submit_request,
+)
+from .attendance.routes import require_account
 from .attendance.sync import CONFIG_APP_ID, CONFIG_APP_SECRET, CONFIG_ENABLED, FEISHU_SYNC_HASH
 from .recruitment.db import STAGE_LABELS
 
 
+class ResignationCreateInput(BaseModel):
+    employee_id: int
+
+
+class ResignationConfirmInput(BaseModel):
+    last_working_day: str | None = None
+
+
+class ResignationRejectInput(BaseModel):
+    note: str = ""
+
+
+class LifecycleConfigInput(BaseModel):
+    public_base_url: str = ""
+
+
+class ResignationSubmitInput(BaseModel):
+    last_working_day: str
+    reason_category: str = ""
+    reason_detail: str = Field(default="", max_length=2000)
+    handover_to: str = Field(default="", max_length=200)
+    handover_note: str = Field(default="", max_length=2000)
+    contact_after: str = Field(default="", max_length=200)
+
+
 def register_hr_routes(
-    app: FastAPI, attendance_store, recruitment_store, repository, feishu_sync
+    app: FastAPI,
+    attendance_store,
+    recruitment_store,
+    repository,
+    feishu_sync,
+    event_engine=None,
+    lifecycle_engine=None,
 ) -> None:
     @app.get("/api/hr/dashboard")
     async def hr_dashboard():
@@ -95,6 +147,27 @@ def register_hr_routes(
             ),
         }
 
+        # ---- 人员流动（入离职事件流聚合） ----
+        lifecycle = employee_flow_dashboard(attendance_store)
+        lifecycle["ops"] = {
+            "public_base_url": attendance_store.get_config(CONFIG_PUBLIC_BASE_URL),
+            "reason_categories": REASON_CATEGORIES,
+            "events": {
+                "configured": bool(event_engine and event_engine.configured),
+                "enabled": bool(event_engine and event_engine.enabled),
+                "running": bool(event_engine and event_engine.running),
+                "connected": bool(event_engine and event_engine.connected),
+                "last_error": event_engine.last_error if event_engine else "",
+                "last_event": event_engine.last_event() if event_engine else None,
+                "stats": event_engine.stats if event_engine else {},
+            },
+            "offboard": {
+                "running": bool(lifecycle_engine and lifecycle_engine.running),
+                "last_error": lifecycle_engine.last_error if lifecycle_engine else "",
+                "last_result": lifecycle_engine.last_result if lifecycle_engine else None,
+            },
+        }
+
         # ---- 招聘进展 ----
         candidates = recruitment_store.query("SELECT COUNT(*) AS c FROM candidate")[0]["c"]
         stage_rows = recruitment_store.query("SELECT stage, COUNT(*) AS c FROM candidate GROUP BY stage")
@@ -108,6 +181,7 @@ def register_hr_routes(
         return {
             "employees": {"total": total, "active": active, "departments": departments},
             "attendance": attendance,
+            "lifecycle": lifecycle,
             "recruitment": {"candidates": candidates, "jobs": jobs, "stages": stages},
             "feishu": feishu,
         }
@@ -132,3 +206,142 @@ def register_hr_routes(
         if not feishu_sync:
             raise HTTPException(status_code=503, detail="飞书考勤同步引擎未初始化")
         return await run_in_threadpool(feishu_sync.sync_once)
+
+    # ---- 人员流动事件流 ----
+
+    @app.get("/api/hr/lifecycle/events")
+    async def lifecycle_events(request: Request):
+        require_account(request, attendance_store)
+        events = list_events(attendance_store, limit=200)
+        return {"events": events, "status_labels": RESIGN_STATUS_LABELS}
+
+    @app.put("/api/hr/lifecycle/config")
+    async def save_lifecycle_config(request: Request, payload: LifecycleConfigInput):
+        require_account(request, attendance_store, write=True)
+        attendance_store.set_config(CONFIG_PUBLIC_BASE_URL, payload.public_base_url.strip().rstrip("/"))
+        # 事件长连接有凭证即自动建立；保存后顺带确保已启动
+        if event_engine is not None:
+            await run_in_threadpool(event_engine.start)
+        return {"ok": True}
+
+    @app.post("/api/hr/lifecycle/run-offboards")
+    async def run_offboards(request: Request):
+        require_account(request, attendance_store, write=True)
+        if lifecycle_engine is None:
+            raise HTTPException(status_code=503, detail="离职定时引擎未初始化")
+        return await run_in_threadpool(lifecycle_engine.run_once)
+
+    # ---- 离职申请（HR 侧） ----
+
+    @app.get("/api/hr/resignations")
+    async def resignations(request: Request):
+        require_account(request, attendance_store)
+        return {"requests": list_requests(attendance_store)}
+
+    @app.post("/api/hr/resignations")
+    async def create_resignation(request: Request, payload: ResignationCreateInput):
+        account = require_account(request, attendance_store, write=True)
+        try:
+            record = await run_in_threadpool(
+                create_request,
+                attendance_store,
+                employee_id=payload.employee_id,
+                created_by_id=account["id"],
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        base_url = resolve_base_url(attendance_store, str(request.base_url))
+        delivery = await run_in_threadpool(_deliver_safely, attendance_store, record, base_url)
+        return {"request": _reload(attendance_store, record["id"]), "delivery": delivery}
+
+    @app.post("/api/hr/resignations/{request_id}/confirm")
+    async def confirm_resignation(request: Request, request_id: int, payload: ResignationConfirmInput):
+        account = require_account(request, attendance_store, write=True)
+        try:
+            record = await run_in_threadpool(
+                confirm_request,
+                attendance_store,
+                request_id,
+                account_id=account["id"],
+                last_working_day=payload.last_working_day,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"request": record}
+
+    @app.post("/api/hr/resignations/{request_id}/reject")
+    async def reject_resignation(request: Request, request_id: int, payload: ResignationRejectInput):
+        require_account(request, attendance_store, write=True)
+        try:
+            record = await run_in_threadpool(
+                reject_request, attendance_store, request_id, note=payload.note
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"request": record}
+
+    @app.post("/api/hr/resignations/{request_id}/resend")
+    async def resend_resignation(request: Request, request_id: int):
+        require_account(request, attendance_store, write=True)
+        record = attendance_store.query_one(
+            "SELECT * FROM resignation_request WHERE id = ?", (request_id,)
+        )
+        if not record:
+            raise HTTPException(status_code=404, detail="离职申请不存在")
+        base_url = resolve_base_url(attendance_store, str(request.base_url))
+        delivery = await run_in_threadpool(_deliver_safely, attendance_store, record, base_url)
+        return {"request": _reload(attendance_store, request_id), "delivery": delivery}
+
+    # ---- 公开离职表单（员工侧，凭令牌访问） ----
+
+    @app.get("/api/resignation/{token}")
+    async def public_form(token: str):
+        record = get_by_token(attendance_store, token)
+        if not record:
+            raise HTTPException(status_code=404, detail="表单链接无效或已失效")
+        return {
+            "request": {
+                "employee_name": record["employee_name"],
+                "employee_no": record["employee_no"],
+                "department": record["department"],
+                "position": record["position"],
+                "status": record["status"],
+                "last_working_day": record["last_working_day"],
+                "reason_category": record["reason_category"],
+                "reason_detail": record["reason_detail"],
+                "handover_to": record["handover_to"],
+                "handover_note": record["handover_note"],
+                "contact_after": record["contact_after"],
+            },
+            "reason_categories": REASON_CATEGORIES,
+        }
+
+    @app.post("/api/resignation/{token}")
+    async def public_submit(token: str, payload: ResignationSubmitInput):
+        try:
+            record = await run_in_threadpool(
+                submit_request,
+                attendance_store,
+                token,
+                last_working_day=payload.last_working_day,
+                reason_category=payload.reason_category,
+                reason_detail=payload.reason_detail,
+                handover_to=payload.handover_to,
+                handover_note=payload.handover_note,
+                contact_after=payload.contact_after,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"ok": True, "status": record["status"], "last_working_day": record["last_working_day"]}
+
+
+def _reload(store, request_id: int) -> dict:
+    return store.query_one("SELECT * FROM resignation_request WHERE id = ?", (request_id,))
+
+
+def _deliver_safely(store, record: dict, base_url: str) -> dict:
+    """下发是外部调用，失败不能让已建好的申请整体报错，统一转成可读的送达结果。"""
+    try:
+        return deliver_request(store, record, base_url=base_url)
+    except Exception as exc:  # noqa: BLE001
+        return {"delivered": False, "manual": True, "link": "", "detail": f"下发表单失败：{exc}"}

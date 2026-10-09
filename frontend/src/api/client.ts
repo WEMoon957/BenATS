@@ -3,6 +3,7 @@
 // 原始 Response，供 Blob 与下载消费。
 
 import { getLanguage, setLanguage, t } from "../i18n";
+import { getSessionToken } from "../auth";
 
 /** 供契约测试控制语言（转发到 i18n 语言状态） */
 export function setApiLanguage(language: "zh-CN" | "en"): void {
@@ -23,6 +24,10 @@ export type ApiOptions = Omit<RequestInit, "headers"> & { headers?: HeadersInit 
 export async function api<T = unknown>(path: string, options: ApiOptions = {}): Promise<T> {
   const headers = new Headers(options.headers || {});
   headers.set("X-App-Token", TOKEN);
+  const session = getSessionToken();
+  if (session) {
+    headers.set("X-Attendance-Token", session);
+  }
   if (options.body && typeof options.body === "string") {
     headers.set("Content-Type", "application/json");
   }

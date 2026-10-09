@@ -18,7 +18,7 @@
   <img src="https://img.shields.io/badge/Frontend-React%20%2B%20TS-61DAFB?style=flat&amp;logo=react&amp;logoColor=black" alt="Frontend: React + TS" />
   <img src="https://img.shields.io/badge/Excel-openpyxl-217346?style=flat" alt="Excel: openpyxl" />
   <img src="https://img.shields.io/badge/PDF-pdfplumber-7B5BF2?style=flat" alt="PDF: pdfplumber" />
-  <img src="https://img.shields.io/badge/Storage-SQLite-003B57?style=flat" alt="Storage: SQLite" />
+  <img src="https://img.shields.io/badge/Storage-SQLite%20%2F%20MySQL-003B57?style=flat" alt="Storage: SQLite / MySQL" />
 </p>
 
 <p align="center">
@@ -64,7 +64,8 @@ BenATS 把招聘串成「找人 → 预评分 → 打招呼 → 收简历 → �
 | **结果交付** | 生成统一的评估结果与推荐名单 |
 | **结果同步** | 任务完成后推送摘要至指定飞书群 |
 | **考勤核算** | 飞书打卡自动同步，匹配员工并核算出勤，跨日异常仅需人工审核 |
-| **全局概览** | 人事中台把员工、考勤与招聘摘要聚合到一屏，横向查看人效与招聘进展 |
+| **全局概览** | 人事中台把员工、考勤、人员流动与招聘摘要聚合到一屏，横向查看人效、人员流动与招聘进展 |
+| **离职管理** | 飞书自动导入入离职信息；员工提离职由系统下发填报表单，HR 确认后在最后工作日自动离职 |
 
 ## 当前能力
 
@@ -157,7 +158,7 @@ BenATS 把招聘串成「找人 → 预评分 → 打招呼 → 收简历 → �
 
 | 能力 | 说明 |
 | --- | --- |
-| **多角色登录** | 独立的账号体系（系统管理员 / HR / 部门主管 / 只读），密码 PBKDF2 哈希保存；管理员与 HR 拥有编辑权限。默认账号 `admin` / `admin`，首次登录会强制要求设置新密码，未修改前无法进行任何写操作。 |
+| **多角色登录** | 全站统一账号体系（系统管理员 / HR / 部门主管 / 只读），密码 PBKDF2 哈希保存；登录后访问所有模块，管理员与 HR 拥有编辑权限。默认账号 `admin` / `admin`，首次登录会强制要求设置新密码，未修改前无法进行任何写操作。 |
 | **人员档案与策略** | 人员档案（工号、姓名、别名、部门、岗位）、标签与考勤策略（标准 / 弹性 / 免考勤 / 兼职 / 轮班）分别管理。 |
 | **飞书打卡导入** | 导入飞书打卡 `.xlsx`，按工号优先、姓名 / 别名兜底匹配；空白或 `-` 算休息，有打卡算出勤。 |
 | **飞书自动同步** | 通过飞书开放平台企业自建应用定时拉取打卡结果（含考勤机打卡），无需手动导出 Excel；需开通「导出打卡数据」权限，凭据在「考勤设置」中配置。 |
@@ -172,23 +173,26 @@ BenATS 把招聘串成「找人 → 预评分 → 打招呼 → 收简历 → �
 | 能力 | 说明 |
 | --- | --- |
 | **从飞书同步员工** | 一键按飞书通讯录刷新员工档案：部门树与成员来自飞书，按工号建档或更新姓名、部门、岗位、手机号、入职日期与在职状态；别名、标签、考勤策略与应出勤天数覆盖保持本地原值。需要在飞书开放平台逐项开通字段权限：`contact:user.base:readonly`（姓名）、`contact:user.employee:readonly`（工号、职务、入职时间、在职状态）、`contact:user.department:readonly`（所属部门）、`contact:department.base:readonly`（部门名称），需要手机号再加 `contact:user.phone:readonly`。飞书已不再提供 `contact:contact:readonly` 这类宽泛权限，而 `contact:contact.base:readonly` 只管接口能否调用、不含上述字段，只开它会导致成员全被跳过。另需把**通讯录权限范围**设为全部成员（查询根部门下的子部门要求全员范围），重新发布后生效。飞书成员没填工号时改用**飞书用户 ID** 建档（员工「工号」列会显示该 ID），同步行会标出这类人数；打卡同步按「工号」查不到时会自动改用「用户 ID」再查一次，所以没有工号也能拉到打卡，需额外开通字段权限 `contact:user.employee_id:readonly`。 |
+| **入离职自动导入** | 配置飞书应用凭证后，应用启动时自动建立事件长连接，实时接收通讯录成员的创建、更新与删除事件，自动维护在职状态并写入入离职事件流；「从飞书同步员工」也会比对在职状态变化补充事件。事件订阅在飞书开放平台配置为**长连接**方式（应用主动连出，无需公网回调地址），需订阅通讯录用户创建 / 更新 / 删除事件；人事中台会显示长连接状态与失败原因。 |
+| **离职流程** | 在「人事中台 → 离职流程」选择在职员工发起离职：系统生成带令牌的填报表单，通过飞书应用消息发给员工本人（需开通 `im:message:send` / `im:message` / `im:message:send_as_bot` 任一权限，且应用可用范围包含该员工）。员工填写最后工作日、离职原因与交接信息后提交，HR 确认；到「最后工作日」当天由后台定时任务自动把员工置为离职并记录事件。发起与送达是两步：消息发不出去时申请照样建好并标注「送达失败 / 未自动送达」，表单链接可直接转发给员工，开通权限后可「重发链接」。 |
+| **人员流动看板** | 在职人数、本月入职 / 离职、本月离职率与期末在职；近 6 个月入离职趋势、离职原因分布、部门人员流动与最近入离职动态。 |
 | **员工信息** | 在职员工数、员工总数与部门分布条形图，取自考勤库的员工档案，可由飞书同步写入，也可在「考勤管理 → 员工」手工维护。 |
 | **考勤汇总** | 最近一个已完成批次的出勤率、待复核数与跨日疑似数，并标注统计月份；没有已完成批次时提示暂无考勤数据。 |
 | **飞书考勤同步** | 考勤汇总卡片显示飞书自动同步的开关状态、最近错误与最新同步批次，并可「立即从飞书同步」触发一轮打卡拉取；同步按工号匹配在职员工。 |
 | **招聘进展** | 候选人总数、筛选任务数与候选人阶段分布。 |
 
 > [!NOTE]
-> 人事中台沿用应用自身的会话令牌，不引入独立的账号体系；飞书应用凭证复用「考勤管理 → 设置」中保存的 App ID 与 App Secret，考勤明细与人工复核仍在「考勤管理」中完成。
+> 人事中台沿用应用自身的会话令牌，不引入独立的账号体系；飞书应用凭证复用「考勤管理 → 设置」中保存的 App ID 与 App Secret，考勤明细与人工复核仍在「考勤管理」中完成。离职填报表单是面向员工的公开页面（凭一次性令牌访问），链接地址由「人事中台 → 飞书事件订阅」中的「表单对外地址」决定；只在本机运行时该地址员工无法访问，需把应用部署到员工可访问的地址后再下发。
 
 ## 技术特性
 
 - **本地优先**：设置、原始任务材料与结果默认保存在用户数据目录（Windows：`%LOCALAPPDATA%\TalentHub`；macOS：`~/.local/share/TalentHub`），默认目录位于源码目录之外；通过 `TALENT_HUB_DATA_DIR` 或 `--data-dir` 自定义时由使用者选择位置。
 - **密钥安全**：Windows 使用当前用户的 DPAPI 加密模型、ASR 与飞书签名密钥；macOS 通过环境变量提供敏感密钥。
-- **回环隔离**：服务仅监听 `127.0.0.1`，每次启动生成随机会话令牌。
+- **账号登录**：全站统一账号登录（系统管理员 / HR / 部门主管 / 只读），密码 PBKDF2 哈希保存；登录后访问所有模块，未登录的接口请求返回 401。
+- **回环 / 局域网监听**：服务默认仅监听 `127.0.0.1`；多人共享时用 `--host 0.0.0.0` 监听局域网，供其他成员通过浏览器访问。
 - **公平性防护**：模型提示词禁止使用年龄、性别、民族、籍贯、婚姻和生育状况进行评价或排序；程序同时按内置受保护属性关键词过滤硬门槛、A/B/C 条件和负向信号。该防护不能替代人工偏差复核。
 - **前端**：React + TypeScript（Vite 构建），由 FastAPI 托管构建产物。
-- **SQLite 存储**：考勤与候选人数据使用 Python 标准库 sqlite3 持久化（`attendance.db` 与 `recruitment.db`），不引入额外数据库依赖。
-- **多角色登录**：考勤模块内置账号体系（系统管理员 / HR / 部门主管 / 只读），密码 PBKDF2 哈希保存。
+- **存储可切换**：默认用 SQLite（`attendance.db`、`recruitment.db`）与任务文件持久化；设置 MySQL 连接后切换为 MySQL 集中存储（考勤、候选人、任务与触达元数据），实现多人共享，简历 / 录音等文件仍保存在服务端数据目录。
 - **飞书通知可选**：使用飞书自定义机器人 Webhook 推送结果摘要，无新增第三方依赖。
 - **BOSS 直聘接入可选**：通过本机 boss-cli（独立部署的 Node/TS 命令行工具，基于 CDP 驱动本机 Chrome）读取职位、候选人与附件简历，并把经 HR 审核的触达动作交给它发送；未安装或未登录时仅招聘接入相关功能不可用，其余模块不受影响。
 - **智联招聘接入可选**：通过本机 zhaopin-cli（独立部署的 Node/TS 命令行工具，基于 CDP 驱动本机 Chrome）读取职位、候选人与详情并执行打招呼；未安装或未登录时仅智联相关命令不可用，其余模块不受影响。点击、滚动与输入均使用浏览器原生事件，不通过注入脚本驱动页面。
@@ -243,6 +247,40 @@ BenATS 把招聘串成「找人 → 预评分 → 打招呼 → 收简历 → �
 > [!NOTE]
 > 文本型 PDF、DOCX、TXT、Markdown 无需 OCR；处理扫描 PDF 或图片时需安装 Tesseract（中文简历建议安装 `chi_sim` 语言包）。应用会从 `TESSERACT_CMD`、`PATH` 和平台常见路径自动探测；探测失败时再在设置中填写程序路径。Windows 可从 [UB Mannheim 安装包](https://github.com/UB-Mannheim/tesseract/wiki) 安装（安装时勾选简体中文语言包）；macOS 可通过 `brew install tesseract tesseract-lang` 安装。分步指引见 [APP_GUIDE「OCR 配置」](APP_GUIDE.md#ocr-配置)。
 
+## 多人共享（MySQL）
+
+默认数据保存在本机（SQLite + 任务文件）。要让多位 HR 通过浏览器共用同一份数据，可切换到 MySQL 集中存储，并让服务监听局域网地址。
+
+1. 准备 MySQL 8（例如用仓库根的 `docker-compose.yml` 一键启动）：
+
+   ```bash
+   cp .env.example .env          # 填写 MYSQL_* 与 ROOT_PASSWORD
+   docker compose up -d
+   ```
+
+2. 迁移既有本机数据（脚本会自动建表；简历 / 录音等文件仍留在服务端数据目录）：
+
+   ```bash
+   python scripts/migrate_sqlite_to_mysql.py \
+     --attendance-sqlite ~/.local/share/TalentHub/attendance.db \
+     --recruitment-sqlite ~/.local/share/TalentHub/recruitment.db \
+     --data-dir ~/.local/share/TalentHub \
+     --mysql-host 127.0.0.1 --mysql-user benats --mysql-password 你的密码 --mysql-database benats
+   ```
+
+3. 启动应用指向 MySQL 并监听局域网：
+
+   ```bash
+   export TALENT_HUB_DB=mysql MYSQL_HOST=127.0.0.1 MYSQL_PORT=3306 \
+          MYSQL_USER=benats MYSQL_PASSWORD=你的密码 MYSQL_DATABASE=benats
+   python -X utf8 -m app.main --host 0.0.0.0
+   ```
+
+4. 其他成员用浏览器访问 `http://<服务器IP>:8765`，用账号登录（默认 `admin` / `admin`，首次登录强制改密）。所有用户共享同一份考勤、候选人与任务数据。
+
+> [!NOTE]
+> 切换到 MySQL 后，飞书应用凭证随考勤库一并存入 MySQL；模型 API Key 等设置仍保存在服务端（设置文件或环境变量）。切换前请备份数据目录。
+
 ## 应用设置（配置项说明）
 
 在应用顶栏右侧的「设置」弹窗中集中管理以下配置。其中「接口地址」「接口密钥」「模型名称」为必填，其余为可选或按需调整。
@@ -280,6 +318,12 @@ BenATS 把招聘串成「找人 → 预评分 → 打招呼 → 收简历 → �
 | `TALENT_HUB_ASR_API_KEY` | 以环境变量方式注入火山引擎 ASR API Key；macOS 使用该变量配置语音转写密钥。 |
 | `TALENT_HUB_FEISHU_SIGN_SECRET` | 以环境变量方式注入飞书机器人签名密钥；Webhook 地址仍可在设置中保存。 |
 | `TALENT_HUB_DATA_DIR` | 覆盖默认数据目录（Windows：`%LOCALAPPDATA%\TalentHub`；macOS：`~/.local/share/TalentHub`），用于设置、任务材料与结果文件，以及考勤 / 招聘候选人的 SQLite 库；解析后的 JD 会保存。自定义路径由使用者负责避开源码目录。 |
+| `TALENT_HUB_DB` | 设为 `mysql` 时切换为 MySQL 集中存储；与 `MYSQL_DATABASE` 任一设置即启用 MySQL。 |
+| `MYSQL_HOST` | MySQL 主机地址，默认 `127.0.0.1`。 |
+| `MYSQL_PORT` | MySQL 端口，默认 `3306`。 |
+| `MYSQL_USER` | MySQL 用户名，默认 `benats`。 |
+| `MYSQL_PASSWORD` | MySQL 密码。 |
+| `MYSQL_DATABASE` | MySQL 数据库名，默认 `benats`。 |
 | `TESSERACT_CMD` | 指定 Tesseract 程序路径；未设置时应用会尝试从 `PATH` 和平台常见路径自动探测。 |
 | `BOSSCLI_BIN` | 指定 boss-cli 可执行文件路径；未设置时使用 `PATH` 中的 `boss` 命令。 |
 | `ZHAOPINCLI_BIN` | 指定 zhaopin-cli 可执行文件路径；未设置时使用 `PATH` 中的 `zhaopin` 命令。 |
@@ -335,11 +379,11 @@ bash scripts/build_macos.sh
 
 - 应用数据默认保存在用户本机（Windows：`%LOCALAPPDATA%\TalentHub`；macOS：`~/.local/share/TalentHub`），包括设置、原始任务材料、解析后的 JD、结果文件、电话转写与整理档案；解析后的简历文本仅在设置项「在本机任务目录保留解析后的简历文本」开启时保存。
 - Windows 上 API Key、ASR Key 与飞书签名密钥使用 DPAPI 加密保存；macOS 上通过环境变量提供敏感密钥。接口不回显明文。
-- 服务仅监听本机回环地址，所有 API 请求均需携带会话令牌。
+- 服务默认仅监听本机回环地址；多人共享时以 `--host 0.0.0.0` 监听局域网。所有 API 请求均需携带登录会话令牌，未登录返回 401。
 - 生成筛选标准时，岗位说明发送至用户配置的模型服务；评估候选人时，解析后的简历文本发送至模型服务；电话整理时，原始录音内容发送至火山引擎 ASR，转写文本发送至模型服务。使用前应评估各服务商的数据处理与合规性。
 - 飞书推送通过 Webhook 将配置的消息内容发送至飞书服务器。Webhook 地址需保密，外发内容的脱敏边界见「飞书推送配置」的提示。
 - 启用招聘接入时，应用通过本机 boss-cli 使用已登录的 BOSS 直聘会话读取在招职位、候选人与附件简历；经 HR 审核的触达动作由 boss-cli 在本机 Chrome 中发送至 BOSS 直聘，不经过其他第三方服务。这些数据同样保存在本机数据目录。
-- 考勤与候选人数据保存在本机 SQLite（`attendance.db`、`recruitment.db`）；启用飞书自动同步时，应用以企业自建应用身份调用飞书考勤打卡接口拉取打卡结果，飞书 App Secret 保存在本机 SQLite 中。
+- 考勤与候选人数据默认保存在本机 SQLite（`attendance.db`、`recruitment.db`），任务与触达元数据默认保存在本机文件目录；切换到 MySQL 后这些数据集中保存到 MySQL，简历、录音等文件仍留在服务端数据目录。启用飞书自动同步时，应用以企业自建应用身份调用飞书考勤打卡接口拉取打卡结果，飞书 App Secret 随考勤库保存。
 - 关键岗位、校招生、稀缺人才及高风险淘汰结果应保留人工复核。
 
 ## 项目结构

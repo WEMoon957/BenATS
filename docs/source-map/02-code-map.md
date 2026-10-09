@@ -8,11 +8,13 @@
 
 | 模块 | 核心职责 | 主要影响对象 |
 | --- | --- | --- |
-| `app/main.py` | 应用装配、路由、令牌中间件、上传限制、下载和预览、服务启动；PDFium 预览在进程内串行执行 | 前端 API、仓储、筛选引擎、电话处理器 |
+| `app/main.py` | 应用装配、路由、会话鉴权中间件、上传限制、下载和预览、服务启动；PDFium 预览在进程内串行执行 | 前端 API、仓储、筛选引擎、电话处理器 |
 | `app/config.py` | 数据目录、`AppSettings`、Windows DPAPI、macOS 环境变量、持久化配置兼容和公开配置 | 模型、ASR、飞书、设置界面、发布运行环境 |
+| `app/auth.py` | 全站账号会话（内存 token → account_id）：登录签发、登出吊销、请求解析 | `app/main.py` 中间件、考勤路由、登录前端 |
+| `app/db/` | 存储后端抽象与选择（`backend.py` SQLite、`mysql_backend.py` MySQL、`sql_translate.py` SQL 方言翻译、`json_backend.py` 任务元数据、`factory.py` 环境变量选择、`migrate.py` 迁移） | 考勤/招聘 store、`JsonStore` 元数据、迁移脚本 |
 | `app/feishu.py` | 飞书签名、脱敏、消息构建、大小保护、有限重试、频控和 `push_with_status` | 设置测试、筛选与电话通知 |
 | `app/models.py` | 筛选、证据、硬性门槛和电话摘要的 Pydantic 契约 | Prompt 输出、持久化 JSON、Excel、前端字段 |
-| `app/repository.py` | `JsonStore` 通用仓储、岗位任务目录、归档、删除、文件名与路径安全 | `main.py`、`pipeline.py`、`call_repository.py` |
+| `app/repository.py` | `JsonStore` 通用仓储（元数据经 `JsonMetadataBackend` 落盘或入 MySQL）、岗位任务目录、归档、删除、文件名与路径安全 | `main.py`、`pipeline.py`、`call_repository.py` |
 | `app/call_repository.py` | 电话任务、音频身份、条目状态和通知字段持久化 | `main.py`、`phone_screening.py`、电话前端 |
 | `app/llm.py` | OpenAI Chat Completions 兼容请求、动态输入序列化、JSON 提取、重试、终止原因和取消 | 筛选标准、候选人评估、横向对比、电话整理 |
 | `app/pipeline.py` | 简历筛选主流程、证据与硬门槛守卫、检查点续跑、Excel 载荷和通知挂点 | Job 状态、结果 JSON、工作簿、前端进度 |
@@ -30,11 +32,14 @@
 | `app/connectors/imports.py` | 职位 JD 与推荐候选人（含可下载的附件简历）导入为一个新任务的编排 | 招聘接入导入端点、任务材料 |
 | `app/connectors/outreach.py` | 触达动作数据类、草稿仓储（`JsonStore` 子类）与动作到 boss 命令的翻译执行 | 触达审核端点、自动化引擎 |
 | `app/connectors/automation.py` | 后台轮询引擎：职位/候选人/消息同步、触达结果回写、附件简历下载与筛选启动、S 级电话任务同步；处理状态持久化在 `automation.json` | 招聘接入界面、Job 与 Call 仓储 |
-| `app/recruitment/` | 候选人 SQLite 存储与阶段状态机（`db.py`）、预评分与招呼草稿（`services.py`、`scoring.py`）、招聘作业 Plan（`plans.py`）与候选人路由（`routes.py`） | 候选人跟进界面、自动化引擎、筛选流水线入口 |
+| `app/recruitment/` | 候选人存储（`db.py`，默认 SQLite、可切 MySQL）与阶段状态机、预评分与招呼草稿（`services.py`、`scoring.py`）、招聘作业 Plan（`plans.py`）与候选人路由（`routes.py`） | 候选人跟进界面、自动化引擎、筛选流水线入口 |
 | `app/rubric/` | 评分标准的模型（`models.py`）、生成/解析/打分（`service.py`）与导出（`export.py`） | 评分标准界面、候选人预评分 |
-| `app/attendance/` | 考勤 SQLite 存储与账号角色（`db.py`）、打卡解析与核算（`services.py`）、路由与认证（`routes.py`）、核算表导出（`exporter.py`）、飞书同步（`feishu.py`、`sync.py`） | 考勤界面、飞书考勤数据 |
-| `app/attendance/feishu_contacts.py` | 飞书通讯录客户端（部门树递归、成员分页）与员工档案同步：按工号建档或刷新飞书人事字段，保留本地专有字段 | 员工档案、人事中台同步入口、飞书通讯录权限 |
-| `app/hr.py` | 人事中台看板聚合：员工规模与部门分布、最近一个已完成批次的考勤汇总、候选人阶段分布与筛选任务数；并提供从飞书通讯录刷新员工档案、触发一轮飞书考勤同步的写入口 | `attendance.db`、`recruitment.db`、任务仓储、飞书通讯录与考勤同步引擎、人事中台视图 |
+| `app/attendance/` | 考勤存储（`db.py`，默认 SQLite、可切 MySQL）与账号角色、打卡解析与核算（`services.py`）、路由与认证（`routes.py`）、核算表导出（`exporter.py`）、飞书同步（`feishu.py`、`sync.py`） | 考勤界面、飞书考勤数据 |
+| `app/attendance/feishu_contacts.py` | 飞书通讯录客户端（部门树递归、成员分页）与员工档案同步：按工号建档或刷新飞书人事字段，保留本地专有字段；比对在职状态变化派生入离职事件 | 员工档案、人事中台同步入口、飞书通讯录权限 |
+| `app/attendance/feishu_events.py` | 飞书事件订阅（长连接）：有凭证即随应用启动连接，通讯录成员创建 / 更新 / 删除事件 → 员工档案与入离职事件；部门名按事件里的 `department_ids` 查一次并缓存；暴露 `connected` 与可执行的连接失败提示 | 飞书开放平台长连接配置、员工档案、入离职事件流 |
+| `app/attendance/lifecycle.py` | 员工生命周期：入离职事件流写入与查询、离职执行（`offboard_employee`）、到期自动离职（`process_due_offboards`）、人员流动看板聚合与定时引擎 | 员工在职状态、人事中台人员流动看板 |
+| `app/attendance/resignation.py` | 离职表单流程：申请状态机（发起 / 提交 / 确认 / 驳回）、飞书应用消息下发表单链接、表单对外地址解析 | 离职流程界面、公开离职表单、飞书发消息权限 |
+| `app/hr.py` | 人事中台看板聚合：员工规模与部门分布、最近一个已完成批次的考勤汇总、人员流动看板、候选人阶段分布与筛选任务数；并提供飞书员工同步、飞书考勤同步、离职流程与公开离职表单的读写入口 | `attendance.db`、`recruitment.db`、任务仓储、飞书通讯录 / 考勤同步 / 事件订阅引擎、人事中台与离职表单视图 |
 | `frontend/src/` | React + TypeScript 前端；`App.tsx` 负责外壳和协调，`views/` 负责业务视图，`ui/` 负责对话框与基础组件 | 后端路由、字段、状态枚举和前端验证 |
 | `launcher.py` | PyInstaller 启动入口 | `app.main.main()`、打包配置 |
 | `start-app.bat` | 启动后端和 `vite build --watch`；前端依赖需已安装 | 本地开发启动 |
@@ -77,7 +82,7 @@
 - `frontend/src/views/CallItemDetail.tsx` 负责录音播放、事实时间跳转、字段与 narrative 编辑、任务回读和 Markdown 下载。事实引用仅用于尝试定位录音，不裁决正文或字段状态。
 - `frontend/src/views/RecruitmentWorkbench.tsx` 是招聘工作台入口，内含「作业台 / 触达审核 / 候选人 / 电话约谈 / 评分标准」五个 Tab。
 - `frontend/src/views/RecruitmentWizard.tsx` 负责招聘作业的创建与执行前检查；`BossView.tsx` 负责引擎状态、目标岗位与触达审核；`CandidateView.tsx` 负责候选人阶段看板与阶段推进；`CallsView.tsx` 负责电话约谈列表；`RubricView.tsx` 负责评分标准上传、生成与打分。
-- `frontend/src/views/AttendanceView.tsx` 负责考勤账号登录、员工与考勤规则、打卡表导入、核算结果与飞书同步；其认证 token 独立于 `X-App-Token`。
+- `frontend/src/views/AttendanceView.tsx` 负责员工与考勤规则、打卡表导入、核算结果与飞书同步；其认证 token（`X-Attendance-Token`）与全站登录会话共用。
 - `frontend/src/views/HRCenterView.tsx` 渲染人事中台看板，以三块卡片展示员工、考勤与招聘摘要，数据来自 `/api/hr/dashboard`，进入视图时刷新；员工卡片内的「从飞书同步员工」提交 `/api/hr/feishu-employees/sync`，考勤卡片内的「立即从飞书同步」提交 `/api/hr/feishu-sync`，两者完成后都重载看板。
 
 前端单元与契约测试位于 `frontend/tests/`；后端契约、状态、并发和发布验证位于 `tests/` 与 `scripts/verify_*`。文档只描述测试锁定的行为范围，不固定用例数量。

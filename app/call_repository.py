@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .db.json_backend import JsonMetadataBackend
 from .repository import JsonStore, safe_filename
 
 
@@ -13,8 +14,11 @@ ALLOWED_AUDIO_SUFFIXES = {".m4a", ".wav", ".mp3", ".ogg", ".opus"}
 class CallRepository(JsonStore):
     """电话确认任务的持久化存储：复用 JsonStore 通用仓储逻辑。"""
 
-    def __init__(self, root: Path) -> None:
-        super().__init__(root, subdir="calls", metadata_name="record.json", temp_prefix="record-")
+    def __init__(self, root: Path, *, backend: JsonMetadataBackend | None = None) -> None:
+        super().__init__(
+            root, subdir="calls", metadata_name="record.json", temp_prefix="record-",
+            kind="call", backend=backend,
+        )
 
     def create(self, title: str = "", job_title: str = "", soft_skill_focus: str = "",
                job_id: str = "", soft_skill_dimensions: list[str] | None = None,

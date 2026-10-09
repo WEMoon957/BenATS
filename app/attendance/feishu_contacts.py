@@ -258,7 +258,7 @@ def _find_existing(store, item: dict, employee_no: str):
         if not candidate:
             continue
         row = store.query_one(
-            "SELECT id, employment_status FROM employee WHERE employee_no = ?", (candidate,)
+            "SELECT id, employment_status, active FROM employee WHERE employee_no = ?", (candidate,)
         )
         if row:
             return row
@@ -270,12 +270,17 @@ def sync_employees(store, client: FeishuContactsClient) -> dict:
 
     飞书成员常常没填工号，此时用飞书用户 ID 兜底建档：人事中台能看到完整人员，
     但这些记录不会进入飞书考勤按工号的取数，摘要里的 `fallback_user_id` 记录这类人数。
+
+    同步过程中比对在职状态变化，自动派生入离职事件写入生命周期事件流。
     """
+    from .lifecycle import derive_events_from_sync
+
     employees = client.fetch_employees()
     inserted = 0
     updated = 0
     skipped = 0
     fallback_user_id = 0
+    transitions: list[dict] = []
     for item in employees:
         # 唯一键优先用飞书工号；没有工号时用飞书用户 ID（考勤接口支持按它取数），最后才是 open_id
         employee_no = item["employee_no"] or item["feishu_user_id"] or item["feishu_open_id"]
@@ -289,8 +294,8 @@ def sync_employees(store, client: FeishuContactsClient) -> dict:
         if existing:
             store.execute(
                 "UPDATE employee SET employee_no = ?, name = ?, department = ?, position = ?, phone = ?, "
-                "join_date = COALESCE(?, join_date), employment_status = ?, active = ?, updated_at = ? "
-                "WHERE id = ?",
+                "join_date = COALESCE(?, join_date), employment_status = ?, active = ?, "
+                "feishu_user_id = ?, feishu_open_id = ?, updated_at = ? WHERE id = ?",
                 (
                     employee_no,
                     item["name"],
@@ -300,16 +305,20 @@ def sync_employees(store, client: FeishuContactsClient) -> dict:
                     item["join_date"],
                     status,
                     1 if item["active"] else 0,
+                    item["feishu_user_id"],
+                    item["feishu_open_id"],
                     _now(),
                     existing["id"],
                 ),
             )
+            employee_id = existing["id"]
+            was_active = bool(existing["active"])
             updated += 1
         else:
-            store.execute(
+            employee_id = store.execute(
                 "INSERT INTO employee (employee_no, name, aliases, department, position, join_date, "
-                "employment_status, active, phone, created_at, updated_at) "
-                "VALUES (?, ?, '[]', ?, ?, ?, ?, ?, ?, ?, ?)",
+                "employment_status, active, phone, feishu_user_id, feishu_open_id, created_at, updated_at) "
+                "VALUES (?, ?, '[]', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     employee_no,
                     item["name"],
@@ -319,11 +328,29 @@ def sync_employees(store, client: FeishuContactsClient) -> dict:
                     status,
                     1 if item["active"] else 0,
                     item["phone"],
+                    item["feishu_user_id"],
+                    item["feishu_open_id"],
                     _now(),
                     _now(),
                 ),
             )
+            # 首次建档：只有当前在职才算一次入职，已经离开的不补事件
+            was_active = False
             inserted += 1
+        transitions.append(
+            {
+                "employee": {
+                    "id": employee_id,
+                    "employee_no": employee_no,
+                    "name": item["name"],
+                    "department": item["department"],
+                },
+                "was_active": was_active,
+                "is_active": bool(item["active"]),
+                "join_date": item["join_date"],
+            }
+        )
+    events_written = derive_events_from_sync(store, transitions)
     # 一名都写不进去通常是字段权限没开齐：能读到姓名的成员总有工号或飞书用户 ID 可用作唯一键，
     # 所以被跳过的都是读不到姓名的人。
     if employees and not inserted and not updated:
@@ -340,6 +367,8 @@ def sync_employees(store, client: FeishuContactsClient) -> dict:
         "skipped": skipped,
         # 没有工号、靠飞书用户 ID 建档的人数：这些人不会被飞书考勤按工号取到打卡
         "fallback_user_id": fallback_user_id,
+        # 本次同步派生的入离职事件数
+        "events": events_written,
     }
     store.set_config(CONFIG_LAST_SYNC, json.dumps(summary, ensure_ascii=False))
     return summary

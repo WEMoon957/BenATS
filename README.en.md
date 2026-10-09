@@ -18,7 +18,7 @@
   <img src="https://img.shields.io/badge/Frontend-React%20%2B%20TS-61DAFB?style=flat&amp;logo=react&amp;logoColor=black" alt="Frontend: React + TS" />
   <img src="https://img.shields.io/badge/Excel-openpyxl-217346?style=flat" alt="Excel: openpyxl" />
   <img src="https://img.shields.io/badge/PDF-pdfplumber-7B5BF2?style=flat" alt="PDF: pdfplumber" />
-  <img src="https://img.shields.io/badge/Storage-SQLite-003B57?style=flat" alt="Storage: SQLite" />
+  <img src="https://img.shields.io/badge/Storage-SQLite%20%2F%20MySQL-003B57?style=flat" alt="Storage: SQLite / MySQL" />
 </p>
 
 <p align="center">
@@ -64,7 +64,8 @@ BenATS runs hiring as one trackable funnel — source → pre-score → greet �
 | **Delivering results** | Produces one unified evaluation outcome and shortlist |
 | **Sharing results** | Pushes the result summary to a Feishu group when a task finishes |
 | **Attendance accounting** | Syncs Feishu check-ins automatically, matches employees, and computes attendance; only cross-day anomalies need human review |
-| **At-a-glance overview** | The HR center aggregates employee, attendance, and recruitment summaries on one screen for a cross-cutting view of workforce and hiring progress |
+| **At-a-glance overview** | The HR center aggregates employee, attendance, people-movement, and recruitment summaries on one screen for a cross-cutting view of workforce, movement, and hiring progress |
+| **Resignation management** | Joiners and leavers flow in from Feishu automatically; when an employee resigns, the system delivers a form, and once HR confirms, the employee is offboarded on the last working day |
 
 ## Current capabilities
 
@@ -157,7 +158,7 @@ Zhaopin is integrated through a separately deployed zhaopin-cli, which exposes t
 
 | Capability | Description |
 | --- | --- |
-| **Multi-role sign-in** | A separate account system (administrator / HR / supervisor / read-only) with PBKDF2-hashed passwords; administrators and HR can edit. The default account is `admin` / `admin`, and first sign-in forces you to set a new password; no write action is possible until then. |
+| **Multi-role sign-in** | A unified, app-wide account system (administrator / HR / supervisor / read-only) with PBKDF2-hashed passwords; signing in grants access to every module, and administrators and HR can edit. The default account is `admin` / `admin`, and first sign-in forces you to set a new password; no write action is possible until then. |
 | **Employee records & policies** | Employee records (employee number, name, aliases, department, position), tags, and attendance policies (standard / flexible / exempt / part-time / shift) are managed separately. |
 | **Feishu check-in import** | Imports a Feishu check-in `.xlsx`; matching prefers employee number with name / alias as fallback. Blank or `-` counts as rest, any check-in counts as attendance. |
 | **Automatic Feishu sync** | Pulls check-in results (including device check-ins) on a schedule through a Feishu custom app, with no manual Excel export; requires the "export check-in data" permission, configured under Attendance settings. |
@@ -172,23 +173,26 @@ Open it from the "HR center" entry in the top-bar "New" tool strip for a single-
 | Capability | Description |
 | --- | --- |
 | **Sync employees from Feishu** | Refreshes employee records from the Feishu directory in one click: the department tree and members come from Feishu, and records are created or updated by employee number with name, department, position, mobile, join date, and employment status. Aliases, tags, attendance policies, and expected-day overrides keep their local values. Grant these field permissions one by one in the Feishu console: `contact:user.base:readonly` (name), `contact:user.employee:readonly` (employee number, job title, join time, employment status), `contact:user.department:readonly` (department membership), `contact:department.base:readonly` (department name), plus `contact:user.phone:readonly` for mobile numbers. Feishu no longer offers broad scopes such as `contact:contact:readonly`, and `contact:contact.base:readonly` only governs whether the call is allowed — it carries none of those fields, so granting only that skips every member. Also set the directory **permission scope** to all members (listing children of the root department requires the full scope), then republish. When a Feishu member has no employee number, the record is keyed by the **Feishu user ID** instead (the employee number column shows that ID), and the sync line reports how many people that affects; the attendance sync first queries by employee number and then re-queries whatever Feishu reports as invalid by user ID, so check-ins still come through without employee numbers — this needs the extra field permission `contact:user.employee_id:readonly`. |
+| **Automatic joiner/leaver import** | Once Feishu app credentials are configured, the app opens an event long connection at startup and receives member-created, member-updated, and member-deleted events in real time, keeping employment status current and appending to the joiner/leaver event stream; "Sync employees from Feishu" also diffs employment status and backfills events. Configure the subscription as a **long connection** in the Feishu console (the app dials out, so no public callback URL is needed) and subscribe to the contact user created / updated / deleted events; the HR center shows the connection state and any failure reason. |
+| **Resignation workflow** | Pick an active employee under HR center → Resignation workflow to start a resignation: the system generates a tokenized form and delivers it to the employee through a Feishu app message (needs any of `im:message:send` / `im:message` / `im:message:send_as_bot`, with the app availability scope covering that employee). The employee fills in the last working day, reason, and handover details; HR confirms, and on the last working day a background job offboards the employee automatically and records the event. Starting and delivering are two steps: when the message cannot be sent the request is still created and flagged "delivery failed / not auto-delivered", and the form link can be forwarded manually or re-sent after the scope is granted. |
+| **People-movement board** | Active headcount, joiners / leavers this month, monthly turnover, and headcount at month end; a six-month joiner/leaver trend, resignation reasons, movement by department, and recent movements. |
 | **Employee info** | Active and total employee counts plus a department distribution bar chart, taken from the attendance employee records, which can be written by the Feishu sync or maintained by hand under Attendance management → Employees. |
 | **Attendance summary** | Attendance rate, items to review, and cross-day candidates for the most recent completed batch, labelled with its period; when no batch is completed it reports that no attendance data is available. |
 | **Feishu attendance sync** | The attendance card shows whether automatic Feishu sync is on, the last error, and the most recent synced batch, and offers "Sync attendance now" to pull one round of check-ins; matching is by employee number against active employees. |
 | **Recruitment progress** | Candidate total, screening-task count, and the candidate stage distribution. |
 
 > [!NOTE]
-> The HR center reuses the application session token and adds no separate account system; the Feishu app credentials are shared with Attendance management → Settings, and attendance detail plus manual review stay in Attendance management.
+> The HR center reuses the application session token and adds no separate account system; the Feishu app credentials are shared with Attendance management → Settings, and attendance detail plus manual review stay in Attendance management. The resignation form is a public page for employees (accessed with a one-time token); its link host comes from "Public form base URL" under HR center → Feishu event subscription. While the app runs on localhost only, employees cannot reach that address — deploy the app somewhere employees can reach before sending links.
 
 ## Technical highlights
 
 - **Local-first**: settings, original task materials, and results are stored in the user data directory by default (Windows: `%LOCALAPPDATA%\TalentHub`; macOS: `~/.local/share/TalentHub`), which is outside the source tree. When overridden with `TALENT_HUB_DATA_DIR` or `--data-dir`, the operator chooses the location.
 - **Key security**: Windows encrypts model, ASR, and Feishu signature keys with the current user's DPAPI; macOS uses environment variables for secrets.
-- **Loopback isolation**: the service listens on `127.0.0.1` only and generates a per-session token at startup.
+- **Account sign-in**: a unified, app-wide account system (administrator / HR / supervisor / read-only) with PBKDF2-hashed passwords; signing in grants access to every module, and unauthenticated API requests return 401.
+- **Loopback / LAN listening**: the service listens on `127.0.0.1` by default; use `--host 0.0.0.0` for multi-user sharing so other members can reach it through a browser.
 - **Fairness safeguards**: model prompts prohibit using age, sex, ethnicity, place of origin, marital status, or reproductive status for evaluation or ranking. Code also filters hard requirements, A/B/C conditions, and negative signals against its built-in protected-attribute terms. These safeguards do not replace human bias review.
 - **Frontend**: React + TypeScript frontend (Vite build), served by FastAPI.
-- **SQLite storage**: attendance and candidate data persist through Python's standard-library sqlite3 (`attendance.db` and `recruitment.db`), adding no extra database dependency.
-- **Multi-role sign-in**: the attendance module ships its own account system (administrator / HR / supervisor / read-only) with PBKDF2-hashed passwords.
+- **Switchable storage**: attendance and candidate data persist through SQLite (`attendance.db`, `recruitment.db`) and task files by default; with a MySQL connection configured, they move to centralized MySQL storage (attendance, candidates, jobs, and outreach metadata) for multi-user sharing, while resume and recording files stay in the server's data directory.
 - **Optional Feishu notifications**: pushes result summaries via a Feishu custom bot Webhook, with no new third-party dependency.
 - **Optional Boss Zhipin integration**: reads positions, candidates, and attached resumes through a locally deployed boss-cli (a standalone Node/TS CLI driving the local Chrome over CDP), and hands HR-approved outreach actions to it for sending. When it is missing or not signed in, only Boss Connect is unavailable; the other modules are unaffected.
 - **Optional Zhaopin integration**: reads positions, candidates, and details and performs greetings through a locally deployed zhaopin-cli (a standalone Node/TS CLI driving the local Chrome over CDP). Clicking, scrolling, and typing use native browser events rather than injected scripts. When it is missing or not signed in, only the Zhaopin commands are unavailable; the other modules are unaffected.
@@ -243,6 +247,40 @@ The app opens your default browser on startup. On first use, on Windows enter th
 > [!NOTE]
 > Text-based PDF, DOCX, TXT, and Markdown need no OCR. For scanned PDFs or images, install Tesseract (and the `chi_sim` language pack for Chinese resumes). The app checks `TESSERACT_CMD`, `PATH`, and common platform paths automatically; enter the executable path in Settings only if detection fails. On Windows, install it from the [UB Mannheim installer](https://github.com/UB-Mannheim/tesseract/wiki) and select Simplified Chinese during setup;  A step-by-step guide is available in [APP_GUIDE「OCR 配置」](APP_GUIDE.md#ocr-配置) (Chinese).
 
+## Multi-user sharing (MySQL)
+
+By default, data stays on the local machine (SQLite + task files). To let several HR users share one dataset through a browser, switch to centralized MySQL storage and make the service listen on the LAN.
+
+1. Provision MySQL 8 (for example with the repo's `docker-compose.yml`):
+
+   ```bash
+   cp .env.example .env          # fill in MYSQL_* and ROOT_PASSWORD
+   docker compose up -d
+   ```
+
+2. Migrate existing local data (the script creates tables automatically; resume and recording files stay in the server's data directory):
+
+   ```bash
+   python scripts/migrate_sqlite_to_mysql.py \
+     --attendance-sqlite ~/.local/share/TalentHub/attendance.db \
+     --recruitment-sqlite ~/.local/share/TalentHub/recruitment.db \
+     --data-dir ~/.local/share/TalentHub \
+     --mysql-host 127.0.0.1 --mysql-user benats --mysql-password YOUR_PASSWORD --mysql-database benats
+   ```
+
+3. Start the app pointing at MySQL and listening on the LAN:
+
+   ```bash
+   export TALENT_HUB_DB=mysql MYSQL_HOST=127.0.0.1 MYSQL_PORT=3306 \
+          MYSQL_USER=benats MYSQL_PASSWORD=YOUR_PASSWORD MYSQL_DATABASE=benats
+   python -X utf8 -m app.main --host 0.0.0.0
+   ```
+
+4. Other members open `http://<server-ip>:8765` in a browser and sign in (default `admin` / `admin`, with a forced password change on first sign-in). Everyone shares the same attendance, candidate, and task data.
+
+> [!NOTE]
+> With MySQL enabled, Feishu app credentials are stored in MySQL together with the attendance database; model API keys and other settings stay on the server (settings file or environment variables). Back up the data directory before switching storage.
+
 ## Application settings
 
 The Settings dialog (top-right) centrally manages the options below. "API endpoint", "API key", and "Model" are required; the rest are optional or tuned on demand.
@@ -280,6 +318,12 @@ Phone-call transcription uses **Volcano Engine large-model speech recognition (a
 | `TALENT_HUB_ASR_API_KEY` | Injects the Volcano Engine ASR API key via environment variable; macOS uses this variable for speech-to-text. |
 | `TALENT_HUB_FEISHU_SIGN_SECRET` | Injects the Feishu bot signature secret via environment variable; the Webhook URL can still be saved in Settings. |
 | `TALENT_HUB_DATA_DIR` | Overrides the default data directory (Windows: `%LOCALAPPDATA%\TalentHub`; macOS: `~/.local/share/TalentHub`) for settings, task materials, result files, and the attendance / candidate SQLite databases. Parsed JD text is saved. The operator is responsible for keeping a custom path outside the source tree. |
+| `TALENT_HUB_DB` | Set to `mysql` to switch to centralized MySQL storage; setting it or `MYSQL_DATABASE` enables MySQL. |
+| `MYSQL_HOST` | MySQL host address, default `127.0.0.1`. |
+| `MYSQL_PORT` | MySQL port, default `3306`. |
+| `MYSQL_USER` | MySQL username, default `benats`. |
+| `MYSQL_PASSWORD` | MySQL password. |
+| `MYSQL_DATABASE` | MySQL database name, default `benats`. |
 | `TESSERACT_CMD` | Specifies the Tesseract executable path; if unset, the app tries `PATH` and platform-specific common locations. |
 | `BOSSCLI_BIN` | Specifies the boss-cli executable path; if unset, the `boss` command on `PATH` is used. |
 | `ZHAOPINCLI_BIN` | Specifies the zhaopin-cli executable path; if unset, the `zhaopin` command on `PATH` is used. |
@@ -335,11 +379,11 @@ The script creates `dist/TalentHub.app` and `release/<version>/macos/TalentHub-m
 
 - App data is stored by default on the user's machine (Windows: `%LOCALAPPDATA%\TalentHub`; macOS: `~/.local/share/TalentHub`), including settings, original task materials, parsed JD text, result files, phone transcripts, and organized records. Parsed resume text is saved only when the setting "Keep parsed resume text in the local task folder" is enabled.
 - On Windows, API keys, ASR keys, and Feishu signature secrets are encrypted with DPAPI; on macOS, secrets are provided through environment variables. Plaintext secrets are never returned by the API.
-- The service listens only on the loopback address, and all API requests require a session token.
+- The service listens only on the loopback address by default; for multi-user sharing, use `--host 0.0.0.0` to listen on the LAN. All API requests require a sign-in session token, and unauthenticated requests return 401.
 - When criteria are generated, the job description is sent to the configured model service; when candidates are evaluated, parsed resume text is sent to that model service. For phone screening, original recording content is sent to Volcano Engine ASR, and the transcript is sent to the model service. Evaluate each provider's data handling and compliance before use.
 - Feishu push sends the configured message content to Feishu servers through a Webhook. Keep the Webhook URL private; the masking boundary for outbound content is described in the Feishu push setup tip.
 - With Boss Connect enabled, the app uses a signed-in BOSS Zhipin session through the local boss-cli to read open positions, candidates, and attached resumes; HR-approved outreach actions are sent to BOSS Zhipin by boss-cli in the local Chrome and go through no other third-party service. This data is likewise stored in the local data directory.
-- Attendance and candidate data are stored in local SQLite (`attendance.db`, `recruitment.db`). With automatic Feishu sync enabled, the app pulls check-in results from the Feishu attendance API as a custom enterprise app; the Feishu app secret is stored in the local SQLite database.
+- Attendance and candidate data are stored in local SQLite (`attendance.db`, `recruitment.db`) by default, and task / outreach metadata in local file folders; with MySQL enabled, this data is stored centrally in MySQL, while resume and recording files stay in the server's data directory. With automatic Feishu sync enabled, the app pulls check-in results from the Feishu attendance API as a custom enterprise app; the Feishu app secret is stored together with the attendance database.
 - Keep manual review for critical roles, campus hires, scarce talent, and high-risk rejections.
 
 ## Project layout

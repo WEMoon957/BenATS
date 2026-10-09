@@ -1,14 +1,13 @@
 // 考勤管理视图：账号登录 + 看板/人员/导入/结果/跨日审核/设置 六个子视图。
-// 考勤模块有独立账号体系，会话 token 存 localStorage，请求携带 X-Attendance-Token。
+// 账号体系与整站共享，会话 token 存 localStorage，请求携带 X-Attendance-Token。
 
 import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { api } from "../api/client";
+import { SESSION_TOKEN_KEY as ATT_TOKEN_KEY } from "../auth";
 import { onChange, t } from "../i18n";
 import { registerView } from "../router";
 import { Button } from "../ui/Button";
-
-const ATT_TOKEN_KEY = "talentHub.attendanceToken";
 
 export interface AttendanceViewProps {
   onToast: (message: string) => void;

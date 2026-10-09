@@ -46,8 +46,13 @@ from .connectors.outreach import (
 from .connectors.automation import AutomationEngine, AutomationStore, _is_target_job
 from .connectors.zhaopin_cli import ZhaopinCliConnector, ZhaopinCliError
 from .attendance.db import get_store as get_attendance_store
+from .attendance.feishu_events import FeishuEventEngine
+from .attendance.lifecycle import LifecycleEngine
 from .attendance.routes import register_routes as register_attendance_routes
 from .attendance.sync import FeishuSyncEngine
+from .auth import account_id_for
+from .db.factory import build_json_backend
+from .dotenv import load_dotenv
 from .recruitment.db import get_store as get_recruitment_store
 from .recruitment.routes import register_routes as register_recruitment_routes
 from .hr import register_hr_routes
@@ -403,12 +408,13 @@ def public_settings(settings: AppSettings, ocr: dict[str, object]) -> dict[str, 
 def create_app(data_dir: Path | None = None, app_token: str | None = None) -> FastAPI:
     root = data_dir or app_data_dir()
     settings_store = SettingsStore(root)
-    repository = JobRepository(root)
+    json_backend = build_json_backend(root)
+    repository = JobRepository(root, backend=json_backend)
     engine = EvaluationEngine(repository, settings_store)
-    call_repository = CallRepository(root)
+    call_repository = CallRepository(root, backend=json_backend)
     call_processor = CallProcessor(call_repository, settings_store)
     boss = BossCliConnector()
-    outreaches = OutreachStore(root)
+    outreaches = OutreachStore(root, backend=json_backend)
     automation_store = AutomationStore(root)
     recruitment_store = get_recruitment_store()
     automation = AutomationEngine(
@@ -431,17 +437,30 @@ def create_app(data_dir: Path | None = None, app_token: str | None = None) -> Fa
     app.state.attendance_store = attendance_store
     feishu_sync = FeishuSyncEngine(attendance_store)
     app.state.feishu_sync = feishu_sync
+    feishu_events = FeishuEventEngine(attendance_store)
+    app.state.feishu_events = feishu_events
+    lifecycle_engine = LifecycleEngine(attendance_store)
+    app.state.lifecycle = lifecycle_engine
     app.state.recruitment_store = recruitment_store
     # 每任务一把 asyncio 上传锁：串行化同一任务的并发上传，避免预留/元数据竞争
     upload_locks: dict[str, asyncio.Lock] = {}
     app.state.upload_locks = upload_locks
 
     @app.middleware("http")
-    async def local_token_guard(request: Request, call_next):
-        if request.url.path.startswith("/api/"):
-            supplied = request.headers.get("X-App-Token", "")
-            if not secrets.compare_digest(supplied, token):
-                return JSONResponse({"detail": "无效的本地会话令牌"}, status_code=403)
+    async def session_guard(request: Request, call_next):
+        path = request.url.path
+        if path.startswith("/api/") and path not in {"/api/attendance/login", "/health"}:
+            account_id = account_id_for(request.headers.get("X-Attendance-Token", ""))
+            if account_id is not None:
+                account = attendance_store.query_one(
+                    "SELECT is_active FROM account WHERE id = ?", (account_id,)
+                )
+                if not account or not account["is_active"]:
+                    return JSONResponse({"detail": "账号已停用"}, status_code=403)
+            else:
+                supplied = request.headers.get("X-App-Token", "")
+                if not secrets.compare_digest(supplied, token):
+                    return JSONResponse({"detail": "未登录或会话已过期"}, status_code=401)
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
@@ -472,6 +491,12 @@ def create_app(data_dir: Path | None = None, app_token: str | None = None) -> Fa
 
     @app.get("/", response_class=HTMLResponse)
     async def index():
+        html = (static_dir / "index.html").read_text(encoding="utf-8")
+        return HTMLResponse(html.replace("__APP_TOKEN__", token))
+
+    # 离职填报表单：员工凭令牌在浏览器打开，走与应用同一份前端产物
+    @app.get("/resign/{form_token}", response_class=HTMLResponse)
+    async def resignation_form(form_token: str):
         html = (static_dir / "index.html").read_text(encoding="utf-8")
         return HTMLResponse(html.replace("__APP_TOKEN__", token))
 
@@ -1423,7 +1448,15 @@ def create_app(data_dir: Path | None = None, app_token: str | None = None) -> Fa
 
     register_attendance_routes(app, attendance_store, feishu_sync)
     register_recruitment_routes(app, recruitment_store)
-    register_hr_routes(app, attendance_store, recruitment_store, repository, feishu_sync)
+    register_hr_routes(
+        app,
+        attendance_store,
+        recruitment_store,
+        repository,
+        feishu_sync,
+        feishu_events,
+        lifecycle_engine,
+    )
 
     app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
     return app
@@ -1472,10 +1505,10 @@ def configure_app_logging(data_dir: Path) -> Path | None:
         return None
 
 
-def create_server_config(app: FastAPI, port: int) -> uvicorn.Config:
+def create_server_config(app: FastAPI, port: int, host: str = "127.0.0.1") -> uvicorn.Config:
     return uvicorn.Config(
         app,
-        host="127.0.0.1",
+        host=host,
         port=port,
         log_level="warning",
         log_config=None,
@@ -1484,8 +1517,10 @@ def create_server_config(app: FastAPI, port: int) -> uvicorn.Config:
 
 
 def main() -> None:
+    load_dotenv()  # 读取 .env，与 docker-compose 共用 MySQL 连接配置
     parser = argparse.ArgumentParser(description="启动招聘工作台")
     parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--host", default="127.0.0.1", help="监听地址；多人共享时用 0.0.0.0")
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument("--data-dir", type=Path)
     args = parser.parse_args()
@@ -1506,11 +1541,14 @@ def main() -> None:
     app = create_app(data_dir, token)
     app.state.automation.start()
     app.state.feishu_sync.start()
-    url = f"http://127.0.0.1:{port}/"
+    app.state.feishu_events.start()
+    app.state.lifecycle.start()
+    browse_host = "127.0.0.1" if args.host == "0.0.0.0" else args.host
+    url = f"http://{browse_host}:{port}/"
     if not args.no_browser:
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()
-    logging.getLogger(__name__).info("App starting at %s", url)
-    server = uvicorn.Server(create_server_config(app, port))
+    logging.getLogger(__name__).info("App starting at %s (host=%s)", url, args.host)
+    server = uvicorn.Server(create_server_config(app, port, args.host))
     app.state.shutdown_callback = lambda: setattr(server, "should_exit", True)
     server.run()
 

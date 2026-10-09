@@ -82,8 +82,9 @@ AutomationEngine / 触达审批端点
 
 | 安全边界 | 实现位置 | 修改时同步检查 |
 | --- | --- | --- |
-| 仅监听回环地址 | `app/main.py` 的 Uvicorn 配置 | 启动、烟测、产品约束 |
-| API 本地令牌 | `app/main.py` 中间件、HTML meta、`frontend/src/api/client.ts` | 首页注入、所有 API 验证 |
+| 回环 / 局域网监听 | `app/main.py` 的 Uvicorn 配置（`--host`，默认 `127.0.0.1`，多人共享用 `0.0.0.0`） | 启动、烟测、产品约束 |
+| 登录会话令牌 | `app/auth.py` 会话存储、`app/main.py` 中间件、`app/attendance/routes.py` 登录端点、`frontend/src/api/client.ts` | 登录端点、所有 API 验证 |
+| 存储后端切换 | `app/db/`（backend / mysql_backend / sql_translate / json_backend / factory）、`app/db/migrate.py` | 建表脚本、SQL 方言翻译、迁移脚本、多用户共享 |
 | 密钥保护与环境变量 | `app/config.py` | 设置 API、公开配置、模型/ASR/飞书签名密钥、验证 |
 | 文件名清洗 | `app/repository.py` | 上传、下载、预览、结果 `source_file` |
 | 路径边界 | 仓储、`app/artifact_preview.py` | 下载、预览、删除、路径逃逸验证 |

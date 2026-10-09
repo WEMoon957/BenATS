@@ -9,3 +9,5 @@ pypdfium2==5.5.0
 pytesseract==0.3.13
 python-multipart==0.0.32
 uvicorn==0.41.0
+pymysql==1.2.3
+lark-oapi==1.7.3

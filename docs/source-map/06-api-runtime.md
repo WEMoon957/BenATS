@@ -8,7 +8,7 @@
 
 ### 11.1 通用约束
 
-- 所有 `/api/` 请求必须带 `X-App-Token`。
+- 除登录与健康检查外，所有 `/api/` 请求都需通过鉴权：优先校验登录会话（`X-Attendance-Token`），未携带会话时回退到启动生成的 `X-App-Token`；两者都缺失返回 401。
 - JSON 请求使用 `application/json`。
 - 错误响应优先返回 `{"detail": "可展示说明"}`。
 - 文件下载使用非 JSON 响应；中文文件名优先采用 RFC 5987 `filename*=utf-8''...`。
@@ -136,7 +136,7 @@ POST /api/recruitment/plans/{id}/stop            停止作业
 
 ### 11.7 招聘候选人与考勤端点
 
-招聘候选人（`app/recruitment/routes.py`）与评分标准（`app/main.py`），与其他 `/api/` 一样只校验 `X-App-Token`：
+招聘候选人（`app/recruitment/routes.py`）与评分标准（`app/main.py`），与其他 `/api/` 一样走会话鉴权：
 
 ```text
 GET    /api/recruitment/stages                       阶段枚举与中文标签
@@ -155,15 +155,29 @@ POST   /api/rubric/parse                             解析上传的评分标准
 POST   /api/rubric/export                            导出评分标准
 ```
 
-人事中台（`app/hr.py`）聚合员工、考勤与招聘摘要，与其他 `/api/` 一样只校验 `X-App-Token`：
+人事中台（`app/hr.py`）聚合员工、考勤、人员流动与招聘摘要，并承载离职流程；除公开离职表单外，与其他 `/api/` 一样走会话鉴权：
 
 ```text
-GET    /api/hr/dashboard                             员工、考勤与招聘三类摘要
+GET    /api/hr/dashboard                             员工、考勤、人员流动与招聘摘要
 POST   /api/hr/feishu-employees/sync                 按飞书通讯录刷新员工档案
 POST   /api/hr/feishu-sync                           立即触发一轮飞书考勤打卡同步
+GET    /api/hr/lifecycle/events                      入离职事件流（最近 200 条）
+PUT    /api/hr/lifecycle/config                      保存离职表单对外地址
+POST   /api/hr/lifecycle/run-offboards               立即执行一轮到期离职
+GET    /api/hr/resignations                          离职申请列表
+POST   /api/hr/resignations                          发起离职并下发表单
+POST   /api/hr/resignations/{id}/confirm             确认离职申请
+POST   /api/hr/resignations/{id}/reject              驳回离职申请
+POST   /api/hr/resignations/{id}/resend              重发表单链接
+GET    /api/resignation/{token}                      公开：读取离职填报表单
+POST   /api/resignation/{token}                      公开：提交离职填报表单
 ```
 
-- `dashboard` 一次请求内分别读取考勤库与招聘库，不做任何写入：员工总数与在职数、部门分布、最近一个已完成批次的考勤汇总、候选人总数与阶段分布、筛选任务数，以及飞书凭证与员工同步状态。
+- `/api/resignation/*` 不校验登录会话，仅凭应用内置令牌访问，供员工在浏览器打开链接后填写；`token` 是发起离职时生成的一次性令牌，仅存在于申请记录中。
+- 发起 / 重发离职会把表单链接通过飞书应用消息（`im/v1/messages`，`receive_id_type=open_id`，回退 `user_id`）发给员工本人，需要 `im:message:send` / `im:message` / `im:message:send_as_bot` 任一权限。链接宿主取 `app_config.public_base_url`，为空时回退请求地址；无对外地址、无凭证或无飞书标识时降级为手工转发。**发起与送达是两步**：无论送达成功与否申请都已创建（状态 `sent`），下发结果（`delivered` / `manual` / `link` / `detail`）随响应返回，`detail` 落进 `deliver_error` 并在列表里以「送达失败 / 未自动送达」标注。命中权限错误码 `99991672` 时**原样透传飞书 msg**（其中含开通入口链接与所需权限清单），不自造文案。
+- 离职状态机为 `sent → submitted → confirmed → completed`，`rejected` 可从 `sent` / `submitted` / `confirmed` 进入。只有 `confirmed` 且 `last_working_day <= 今天` 的申请会被 `process_due_offboards` 置为 `completed`，并调用 `lifecycle.offboard_employee` 把员工置为离职、写一条 `source=resignation` 的离职事件。
+- `dashboard` 一次请求内分别读取考勤库与招聘库，不做任何写入：员工总数与在职数、部门分布、最近一个已完成批次的考勤汇总、人员流动看板（`lifecycle`）、候选人总数与阶段分布、筛选任务数，以及飞书凭证与员工同步状态。`lifecycle.ops` 另带事件订阅引擎状态、表单对外地址、离职原因选项与到期离职引擎的最近结果。
+- 事件长连接**有凭证即自动建立**，无独立开关：`ops.events` 的 `configured` 表示凭证是否齐备，`enabled` 为「已配置且未被显式关闭」，`running` 为工作线程存活，`connected` 为 lark 客户端已握手（读其 `_conn_id`）。连接宽限期内未握手时 `last_error` 给出「去开放平台把订阅方式设为长连接」的可执行提示。飞书控制台的长连接「验证」要求应用侧此刻存在活跃连接，因此必须让应用先处于 `connected` 状态再点验证。
 - 考勤部分取 `import_batch` 中按 `year`、`month`、`created_at` 排序最新的 `completed` 批次；没有该批次时 `latest_period` 为 `null`，出勤率与计数为 0。其中的 `attendance.feishu` 另带同步开关、引擎运行状态、最近错误与最新一个 `feishu-sync` 批次。
 - 员工同步复用「考勤管理」保存的飞书应用凭证，需要逐项开通字段权限且通讯录权限范围为全部成员：`contact:user.base:readonly`（姓名）、`contact:user.employee:readonly`（工号、职务、入职时间、在职状态）、`contact:user.department:readonly`（所属部门）、`contact:department.base:readonly`（部门名称），手机号另需 `contact:user.phone:readonly`。飞书已不再提供 `contact:contact:readonly` 这类宽泛权限，`contact:contact.base:readonly` 只决定接口能否调用：只开它时字段全空，成员会全部被跳过（此时直接报错，不记空摘要）。查询根部门下的子部门要求全员范围，否则飞书返回无部门权限，报错会附带 `contact/v3/scopes` 读到的实际授权范围（部门数与用户数）。同步在 `run_in_threadpool` 中执行，凭证未配置返回 400，飞书侧拒绝返回 502 与可执行提示。
 - 通讯录两个接口的形状：`GET /contact/v3/departments/{department_id}/children` 用**路径参数**传部门 ID（根部门为 `0`），`GET /contact/v3/users/find_by_department` 用**查询参数**传 `department_id`；两者都以 `department_id_type=open_department_id` 对齐，分页读 `items`、`has_more`、`page_token`。
@@ -173,7 +187,7 @@ POST   /api/hr/feishu-sync                           立即触发一轮飞书考
 - 在职判定读飞书 `status`：`is_exited`、`is_resigned`、`is_unjoin` 都记为非在职（`employment_status` 取 `left`），`is_frozen` 仍算在职员工；飞书通讯录不区分试用期与已转正，在职成员保留本地既有的在职状态。
 - 考勤同步同样在 `run_in_threadpool` 中执行一轮 `FeishuSyncEngine.sync_once()`，返回其结果字典：未配置、未开启或没有在职员工时是 `ok: false` 与 `detail`，属正常状态因而仍返回 200；引擎未初始化返回 503。
 
-考勤（`app/attendance/routes.py`）使用独立的账号体系，除 `login` 外的端点都要带 `X-Attendance-Token`：
+考勤（`app/attendance/routes.py`）与全站共用账号体系（`app/auth.py` 会话存储）；登录签发会话 token，除 `login` 外的端点都校验 `X-Attendance-Token`：
 
 ```text
 POST       /api/attendance/login                     登录并签发会话 token
@@ -203,7 +217,7 @@ GET        /api/attendance/feishu/status             同步状态
 - 默认管理员账号为 `admin`，初始密码为 `admin`；`account.must_change_password` 为真时所有写操作返回 403，直到 `POST /api/attendance/change-password` 成功。
 - 员工档案字段限于工号、姓名、别名、部门、岗位、入职日期、用工状态、手机号、标签与考勤策略，不保存银行卡或支付宝等支付信息。
 - 导入只接受 `.xlsx`；上传文件名先经 `safe_filename()` 消毒，再落到 `attendance_imports/<年>/<月>/`。
-- 考勤与招聘候选人状态保存在本机 SQLite（`attendance.db` / `recruitment.db`），位置由 `app_data_dir()` 决定：`--data-dir` 会同步写入 `TALENT_HUB_DATA_DIR`，使两类 SQLite 与任务仓储共用同一根目录。
+- 考勤与招聘候选人默认保存在本机 SQLite（`attendance.db` / `recruitment.db`），任务与触达元数据默认保存在本机文件目录；设置 MySQL 连接（`TALENT_HUB_DB=mysql` 或 `MYSQL_DATABASE`）后切换为 MySQL 集中存储（`app/db/` 的后端选择、SQL 方言翻译与建表脚本），简历 / 录音等文件仍留在服务端数据目录。数据目录位置由 `app_data_dir()` 决定：`--data-dir` 会同步写入 `TALENT_HUB_DATA_DIR`。
 
 ## 12. 并发与持久化交叉影响
 

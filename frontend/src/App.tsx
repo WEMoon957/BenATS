@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { api } from "./api/client";
+import { clearSessionToken } from "./auth";
 import { onChange, setLanguage, t } from "./i18n";
 import { show as routerShow, showSection } from "./router";
 import { state } from "./state";
@@ -499,6 +500,20 @@ export function App() {
           </Button>
           <Button
             variant="icon"
+            id="logoutButton"
+            title={t("attLogout")}
+            aria-label={t("attLogout")}
+            onClick={() => {
+              clearSessionToken();
+              window.location.reload();
+            }}
+          >
+            <svg aria-hidden="true" viewBox="0 0 24 24">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />
+            </svg>
+          </Button>
+          <Button
+            variant="icon"
             id="exitAppButton"
             title={t("exitApp")}
             aria-label={t("exitApp")}
@@ -534,7 +549,7 @@ export function App() {
           />
           <RecruitmentWorkbench onToast={showToast} />
           <AttendanceView onToast={showToast} />
-          <HRCenterView onToast={showToast} />
+          <HRCenterView onToast={showToast} onNavigate={(tool) => switchTool(tool)} />
         </div>
       </main>
 

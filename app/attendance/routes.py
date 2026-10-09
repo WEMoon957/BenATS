@@ -7,8 +7,6 @@
 
 from __future__ import annotations
 
-import secrets
-import threading
 from datetime import datetime, timezone
 from urllib.parse import quote
 
@@ -16,6 +14,7 @@ from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from ..auth import account_id_for, create_session, revoke_session
 from ..config import app_data_dir
 from ..repository import safe_filename
 from .db import WRITE_ROLES, AttendanceStore, hash_password, verify_password
@@ -27,9 +26,6 @@ from .services import (
     file_sha256,
 )
 from .sync import CONFIG_APP_ID, CONFIG_APP_SECRET, CONFIG_ENABLED, FeishuSyncEngine
-
-_sessions: dict[str, int] = {}
-_sessions_lock = threading.Lock()
 
 MAX_IMPORT_BYTES = 10 * 1024 * 1024
 
@@ -51,8 +47,7 @@ def account_payload(account: dict) -> dict:
 
 def require_account(request: Request, store: AttendanceStore, write: bool = False) -> dict:
     token = request.headers.get("X-Attendance-Token", "")
-    with _sessions_lock:
-        account_id = _sessions.get(token)
+    account_id = account_id_for(token)
     if account_id is None:
         raise HTTPException(status_code=401, detail="未登录或会话已过期")
     account = store.query_one("SELECT * FROM account WHERE id = ?", (account_id,), table="account")
@@ -211,16 +206,12 @@ def register_routes(app: FastAPI, store: AttendanceStore, sync_engine: FeishuSyn
             raise HTTPException(status_code=400, detail="账号或密码错误")
         if not account["is_active"]:
             raise HTTPException(status_code=403, detail="账号已停用")
-        token = secrets.token_urlsafe(32)
-        with _sessions_lock:
-            _sessions[token] = account["id"]
+        token = create_session(account["id"])
         return {"token": token, "account": account_payload(account)}
 
     @app.post("/api/attendance/logout")
     async def logout(request: Request):
-        token = request.headers.get("X-Attendance-Token", "")
-        with _sessions_lock:
-            _sessions.pop(token, None)
+        revoke_session(request.headers.get("X-Attendance-Token", ""))
         return {"ok": True}
 
     @app.get("/api/attendance/me")

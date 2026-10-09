@@ -207,3 +207,181 @@ describe("人事中台飞书考勤同步", () => {
     expect(screen.getByText("打卡查询失败：超时")).toBeDefined();
   });
 });
+
+const RESIGN_LIST_PATH = "/api/hr/resignations";
+const ROSTER_PATH = "/api/attendance/employees?active=true";
+
+function lifecycleDashboard(): Record<string, unknown> {
+  return {
+    ...baseDashboard(),
+    lifecycle: {
+      active: 2,
+      total: 3,
+      current: { onboard: 1, offboard: 2, turnover_rate: 50, headcount: 2 },
+      months: [
+        { month: "2026-09", onboard: 1, offboard: 0, headcount: 3, turnover_rate: 0 },
+        { month: "2026-10", onboard: 1, offboard: 2, headcount: 2, turnover_rate: 50 },
+      ],
+      reasons: [{ category: "个人发展", count: 2 }],
+      departments: [{ department: "技术部", active: 2, onboard: 1, offboard: 2 }],
+      pending: { sent: 1, submitted: 1, confirmed: 0, completed: 0 },
+      recent_events: [
+        {
+          id: 1,
+          employee_name: "张三",
+          department: "技术部",
+          event_type: "offboard",
+          event_label: "离职",
+          effective_date: "2026-10-20",
+          source: "resignation",
+          reason: "个人发展",
+        },
+      ],
+      ops: {
+        public_base_url: "",
+        reason_categories: ["个人发展"],
+        events: {
+          configured: false,
+          enabled: false,
+          running: false,
+          connected: false,
+          last_error: "",
+          last_event: null,
+          stats: {},
+        },
+        offboard: { running: false, last_error: "", last_result: null },
+      },
+    },
+  };
+}
+
+function mockLifecycleFetch(overrides: Record<string, () => Response> = {}) {
+  fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+    const path = String(input);
+    if (overrides[path]) return overrides[path]();
+    if (path === RESIGN_LIST_PATH) {
+      return jsonResponse({
+        requests: [
+          {
+            id: 7,
+            employee_name: "张三",
+            department: "技术部",
+            status: "submitted",
+            status_label: "待 HR 确认",
+            last_working_day: "2026-10-20",
+            reason_category: "个人发展",
+            deliver_status: "manual",
+            deliver_error: "",
+          },
+        ],
+      });
+    }
+    if (path === ROSTER_PATH) {
+      return jsonResponse({ employees: [{ id: 1, name: "张三", employee_no: "E001", department: "技术部" }] });
+    }
+    return jsonResponse(dashboard);
+  });
+}
+
+describe("人事中台人员流动看板", () => {
+  it("展示本月入职离职、离职率与部门流动", async () => {
+    dashboard = lifecycleDashboard();
+    mockLifecycleFetch();
+
+    await renderView(vi.fn());
+
+    expect(screen.getByText("人员流动")).toBeDefined();
+    expect(screen.getByText("本月入职")).toBeDefined();
+    expect(screen.getByText("50%")).toBeDefined();
+    expect(screen.getByText("部门人员流动")).toBeDefined();
+  });
+
+  it("确认离职申请后提示将在最后工作日自动离职", async () => {
+    const onToast = vi.fn();
+    dashboard = lifecycleDashboard();
+    mockLifecycleFetch({
+      "/api/hr/resignations/7/confirm": () =>
+        jsonResponse({ request: { id: 7, status: "confirmed" } }),
+    });
+
+    await renderView(onToast);
+    fireEvent.click(screen.getByText("确认离职"));
+
+    await waitFor(() =>
+      expect(onToast).toHaveBeenCalledWith("已确认，将在最后工作日自动离职")
+    );
+  });
+
+  it("发起离职后把未能自动送达的链接提示给 HR", async () => {
+    const onToast = vi.fn();
+    dashboard = lifecycleDashboard();
+    mockLifecycleFetch({
+      "/api/hr/resignations": () =>
+        jsonResponse({
+          request: { id: 9, status: "sent" },
+          delivery: { delivered: false, manual: true, link: "http://x/resign/tk", detail: "未配置对外访问地址" },
+        }),
+    });
+
+    await renderView(onToast);
+    fireEvent.change(document.querySelector(".hr-resign-start select")!, { target: { value: "1" } });
+    fireEvent.click(screen.getByText("发起离职"));
+
+    await waitFor(() =>
+      expect(onToast).toHaveBeenCalledWith(
+        "离职流程已发起，但表单未送达。请手工转发链接：http://x/resign/tk"
+      )
+    );
+  });
+
+  it("未自动送达的申请在列表里带标注，便于 HR 手工转发", async () => {
+    dashboard = lifecycleDashboard();
+    mockLifecycleFetch();
+
+    await renderView(vi.fn());
+
+    expect(screen.getByText("未自动送达")).toBeDefined();
+  });
+
+  it("长连接已连接时显示已连接状态", async () => {
+    dashboard = lifecycleDashboard();
+    const board = dashboard.lifecycle as Record<string, unknown>;
+    (board.ops as Record<string, unknown>).events = {
+      configured: true,
+      enabled: true,
+      running: true,
+      connected: true,
+      last_error: "",
+      last_event: { at: "2026-10-09T03:00:00+00:00", action: "offboard", name: "李四" },
+      stats: {},
+    };
+    mockLifecycleFetch();
+
+    await renderView(vi.fn());
+
+    expect(screen.getByText("已连接")).toBeDefined();
+    expect(screen.getByText("李四")).toBeDefined();
+  });
+
+  it("长连接失败时把后端错误原文展示出来", async () => {
+    dashboard = lifecycleDashboard();
+    const board = dashboard.lifecycle as Record<string, unknown>;
+    (board.ops as Record<string, unknown>).events = {
+      configured: true,
+      enabled: true,
+      running: true,
+      connected: false,
+      last_error: "事件长连接未建立：请在飞书开放平台把「事件订阅」方式设为「长连接」",
+      last_event: null,
+      stats: {},
+    };
+    mockLifecycleFetch();
+
+    await renderView(vi.fn());
+
+    expect(screen.getByText("连接中…")).toBeDefined();
+    expect(
+      screen.getByText("事件长连接未建立：请在飞书开放平台把「事件订阅」方式设为「长连接」")
+    ).toBeDefined();
+  });
+});

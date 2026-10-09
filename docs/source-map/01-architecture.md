@@ -15,8 +15,8 @@ Talent Hub 是一个本机运行的 Python/FastAPI 招聘工作台，前端为 R
 
 系统边界：
 
-- HTTP 服务只监听 `127.0.0.1`。
-- 所有 `/api/` 请求必须携带当前进程生成的本地会话令牌。
+- HTTP 服务默认监听 `127.0.0.1`；多人共享时用 `--host 0.0.0.0` 监听局域网。
+- 除登录与健康检查外，所有 `/api/` 请求都需通过鉴权：优先登录会话（`X-Attendance-Token`），未携带会话时回退到启动生成的 `X-App-Token`。
 - Windows 上模型 API Key、ASR API Key 和飞书签名密钥使用当前用户的 DPAPI 加密；macOS 上通过环境变量提供敏感密钥。
 - JD、原始简历、录音、电话转写和产物保存在本机数据目录；解析后的简历文本仅在“保留解析文本”开启时保存。默认数据目录位于源码目录之外，自定义 `TALENT_HUB_DATA_DIR` 或 `--data-dir` 时由使用者选择位置。
 - 模型输出只作结构输入，不作为最终判定；简历链路执行原文证据校验，电话链路执行结构校验和事实引用录音定位，两条链路均保留人工复核边界。
@@ -56,7 +56,7 @@ FastAPI app/main.py
   └─ artifact_preview.py ───────── Markdown / XLSX 限量预览
 ```
 
-持久化分两类。任务型状态（`job.json`、`record.json`、结果 JSON 与文件目录）落在数据目录的 JSON 与文件中；考勤与招聘候选人状态落在数据目录下的本机 SQLite（`attendance.db`、`recruitment.db`）。修改字段时不能只看 Pydantic 模型或 API，还要考虑已持久化数据的加载、恢复逻辑和前端消费。
+持久化分两类。任务型状态（`job.json`、`record.json`、结果 JSON 与文件目录）落在数据目录的 JSON 与文件中；考勤与招聘候选人状态落在数据目录下的本机 SQLite（`attendance.db`、`recruitment.db`）。设置 MySQL 连接后，考勤、候选人、任务与触达元数据切换为 MySQL 集中存储（`app/db/`），简历 / 录音等文件仍留在数据目录。修改字段时不能只看 Pydantic 模型或 API，还要考虑已持久化数据的加载、恢复逻辑和前端消费。
 
 ## 4. 启动与本地会话数据流
 
@@ -75,9 +75,11 @@ launcher.py 或 python -m app.main
   → 装配 SettingsStore / repositories / engines
   → app.state.automation.start() 启动招聘接入轮询线程（仅 main() 启动路径拉起）
   → app.state.feishu_sync.start() 启动飞书考勤同步线程（仅 main() 启动路径拉起）
-  → Uvicorn 绑定 127.0.0.1
-  → GET / 注入 app_token 到 HTML meta
-  → 前端 main.tsx 挂载 React App
+  → app.state.feishu_events.start() 建立飞书事件长连接（仅在开关打开且凭证就绪时实际连接）
+  → app.state.lifecycle.start() 启动员工生命周期线程，周期执行到期离职
+  → Uvicorn 绑定 127.0.0.1 或 --host 指定地址（多人共享用 0.0.0.0）
+  → GET / 注入 app_token 到 HTML meta；GET /resign/{token} 同样注入，供员工打开离职表单
+  → 前端 main.tsx 挂载 React；路径为 /resign/<token> 时直接渲染离职表单，否则渲染登录门 + App
   → App 启动 effect 请求 GET /api/bootstrap，携带 X-App-Token
 ```
 
@@ -85,8 +87,9 @@ launcher.py 或 python -m app.main
 
 - 修改 `main()` 参数会影响 `launcher.py`、`verify_windows_release.ps1` 和 PyInstaller 启动方式。
 - 修改 `/health` 字段会影响重复实例探测及发布烟测。
-- 修改首页 token 占位符、meta 名称或请求头名称，必须同步修改 `frontend/index.html`、前端 `api/client.ts`、中间件和 API 验证。
-- 修改监听地址不能只改 Uvicorn；产品安全边界明确要求仅监听 `127.0.0.1`。
+- 修改首页 token 占位符、meta 名称或请求头名称，必须同步修改 `frontend/index.html`、前端 `api/client.ts`、中间件和 API 验证；`/resign/{token}` 复用同一份 `dist/index.html` 与占位符。
+- 新增后台线程必须沿用「`create_app()` 只装配、`main()` 才 start」的约定，避免测试拉起真实网络连接。
+- 修改监听地址不能只改 Uvicorn；默认仅监听 `127.0.0.1`，多人共享改用 `--host 0.0.0.0`，同时需评估局域网暴露面的安全影响。
 
 ## 17. 设计上的单一事实来源
 

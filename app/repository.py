@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-import json
 import os
 import re
 import shutil
-import tempfile
 import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+
+from .db.json_backend import FileJsonBackend, JsonMetadataBackend
 
 
 ALLOWED_SUFFIXES = {
@@ -34,12 +34,21 @@ class JsonStore:
     子类只需提供：子目录名、元数据文件名、临时文件前缀、初始记录结构与目录结构。
     """
 
-    def __init__(self, root: Path, *, subdir: str, metadata_name: str, temp_prefix: str) -> None:
+    def __init__(
+        self,
+        root: Path,
+        *,
+        subdir: str,
+        metadata_name: str,
+        temp_prefix: str,
+        kind: str,
+        backend: JsonMetadataBackend | None = None,
+    ) -> None:
         self.root = root / subdir
         self.root.mkdir(parents=True, exist_ok=True)
-        self._metadata_name = metadata_name
-        self._temp_prefix = temp_prefix
+        self._kind = kind
         self._lock = threading.RLock()
+        self._metadata = backend or FileJsonBackend(self.root, metadata_name, temp_prefix)
 
     def _new_record(self, record_id: str, now: str, **kwargs) -> dict:
         raise NotImplementedError
@@ -52,9 +61,6 @@ class JsonStore:
             raise ValueError("无效的任务编号")
         return self.root / record_id
 
-    def metadata_path(self, record_id: str) -> Path:
-        return self._item_dir(record_id) / self._metadata_name
-
     def create(self, **kwargs) -> dict:
         with self._lock:
             record_id = uuid.uuid4().hex
@@ -66,31 +72,16 @@ class JsonStore:
 
     def get(self, record_id: str) -> dict:
         with self._lock:
-            path = self.metadata_path(record_id)
-            if not path.exists():
+            record = self._metadata.get(self._kind, record_id)
+            if record is None:
                 raise FileNotFoundError(record_id)
-            record = json.loads(path.read_text(encoding="utf-8"))
-            record.setdefault("archived_at", None)
             return record
 
     def save(self, record: dict, *, preserve_updated_at: bool = False) -> None:
         with self._lock:
             if not preserve_updated_at:
                 record["updated_at"] = utc_now()
-            directory = self._item_dir(record["id"])
-            directory.mkdir(parents=True, exist_ok=True)
-            descriptor, temp_name = tempfile.mkstemp(
-                prefix=self._temp_prefix, suffix=".tmp", dir=directory,
-            )
-            os.close(descriptor)
-            temp_path = Path(temp_name)
-            try:
-                temp_path.write_text(
-                    json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8",
-                )
-                os.replace(temp_path, self.metadata_path(record["id"]))
-            finally:
-                temp_path.unlink(missing_ok=True)
+            self._metadata.save(self._kind, record)
 
     def update(self, record_id: str, **changes) -> dict:
         with self._lock:
@@ -102,19 +93,10 @@ class JsonStore:
     def list_records(
         self, *, archived: bool, limit: int | None = None, offset: int = 0,
     ) -> list[dict]:
-        records: list[dict] = []
         with self._lock:
-            for path in self.root.glob(f"*/{self._metadata_name}"):
-                try:
-                    record = json.loads(path.read_text(encoding="utf-8"))
-                except (OSError, json.JSONDecodeError):
-                    continue
-                record.setdefault("archived_at", None)
-                if bool(record["archived_at"]) == archived:
-                    records.append(record)
-        records.sort(key=lambda item: item.get("updated_at", ""), reverse=True)
-        start = max(0, offset)
-        return records[start:] if limit is None else records[start:start + max(0, limit)]
+            return self._metadata.list(
+                self._kind, archived=archived, limit=limit, offset=offset
+            )
 
     def archive(self, record_id: str) -> dict:
         with self._lock:
@@ -146,11 +128,15 @@ class JsonStore:
             if target.parent != root:
                 raise ValueError("任务目录路径无效。")
             shutil.rmtree(target)
+            self._metadata.delete(self._kind, record_id)
 
 
 class JobRepository(JsonStore):
-    def __init__(self, root: Path) -> None:
-        super().__init__(root, subdir="jobs", metadata_name="job.json", temp_prefix="job-")
+    def __init__(self, root: Path, *, backend: JsonMetadataBackend | None = None) -> None:
+        super().__init__(
+            root, subdir="jobs", metadata_name="job.json", temp_prefix="job-",
+            kind="job", backend=backend,
+        )
 
     def create(self, title: str = "") -> dict:
         return super().create(title=title)
@@ -201,8 +187,7 @@ class JobRepository(JsonStore):
 
     def job_size(self, job_id: str) -> int:
         directory = self.job_dir(job_id)
-        if not self.metadata_path(job_id).exists():
-            raise FileNotFoundError(job_id)
+        self.get(job_id)  # 元数据存在性检查（文件或 MySQL 后端）
         total = 0
         for root, _directories, filenames in os.walk(directory, followlinks=False):
             for filename in filenames:
